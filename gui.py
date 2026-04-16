@@ -15,8 +15,12 @@ height = (Reference_App_Height * monitor_height) // Reference_Monitor_Height
 
 app.title("LicitaBot")
 app.geometry(f"{width}x{height}")
-app.overrideredirect(True)
 app.resizable(False, False)
+
+button = ctk.CTkButton(app, text="my button")
+button.grid(row=0, column=0, padx=20, pady=20)
+
+ctk.set_default_color_theme("green")
 
 
 app.mainloop()
