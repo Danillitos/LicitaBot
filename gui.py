@@ -1,6 +1,7 @@
 import customtkinter as ctk
 from tkinter import filedialog
 import tkinter as tk
+from pathlib import Path
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("light")
@@ -32,6 +33,11 @@ ICON_COLOR      = "#2D4A5A"
 APP_W = 1440
 APP_H = 900
 
+# ── Folders ───────────────────────────────────────────────────────────────────
+FOLDER_LOGS = Path("Logs").mkdir(exist_ok=True)
+
+FOLDER_SHEETS = Path("Sheets").mkdir(exist_ok=True)
+sheets = [f for f in Path("Sheets").iterdir() if f.suffix in (".xlsx", ".xls")]
 
 # ── Helper widgets ────────────────────────────────────────────────────────────
 def make_panel(parent, **kwargs):
@@ -301,6 +307,8 @@ class LicitaBotApp(ctk.CTk):
         )
         self.listbox.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
+        self.listbox.insert("end", *[f.name for f in sheets])
+
         scrollbar = ctk.CTkScrollbar(lb_frame, command=self.listbox.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.listbox.configure(yscrollcommand=scrollbar.set)
@@ -463,15 +471,15 @@ class LicitaBotApp(ctk.CTk):
 
     # ── Button callbacks ──────────────────────────────────────────────────────
     def _select_sheet(self):
-        path = filedialog.askopenfilename(
-            title="Selecionar Planilha",
-            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")],
-        )
-        if path:
-            name = path.split("/")[-1]
-            if name not in self.listbox.get(0, "end"):
-                self.listbox.insert("end", name)
-            self._load_sheet_info(path)  # ← add this
+        sel = self.listbox.curselection()
+        if not sel:
+            return
+
+        name = self.listbox.get(sel[0])
+        path = Path("Sheets").resolve() / name
+        self._load_sheet_info(str(path))
+        self.entry_dir.delete(0, "end")
+        self.entry_dir.insert(0, str(path))
 
     def _load_sheet_info(self, path: str):
         try:
