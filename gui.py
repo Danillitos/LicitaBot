@@ -234,12 +234,13 @@ class LicitaBotApp(ctk.CTk):
         self.resizable(False, False)
 
         # Info variables
-        self.var_total      = tk.StringVar(value="0")
-        self.var_filled     = tk.StringVar(value="0")
-        self.var_remaining  = tk.StringVar(value="0")
-        self.var_inits      = tk.StringVar(value="0")
-        self.var_errors     = tk.StringVar(value="0")
-        self.var_auto_login = tk.BooleanVar(value=False)
+        self.var_total           = tk.StringVar(value="0")
+        self.var_filled          = tk.StringVar(value="0")
+        self.var_remaining       = tk.StringVar(value="0")
+        self.var_inits           = tk.StringVar(value="0")
+        self.var_errors          = tk.StringVar(value="0")
+        self.var_auto_login      = tk.BooleanVar(value=False)
+        self.var_use_restarts    = tk.BooleanVar(value=True)
 
         self._build_header()
         self._build_body()
@@ -493,11 +494,59 @@ class LicitaBotApp(ctk.CTk):
             "Tentativas por item:",
             tooltip="Define a quantidade de tentativas de preenchimento serão feitas por item caso o mesmo não seja encontrado no sistema.",
         )
-        self.entry_restarts = small_labeled_entry(
-            col1,
-            "Reinicializações máximas:",
-            tooltip="Define a quantidade de vezes a automação irá reiniciar caso o sistema falhe ou venha a cair.",
+        
+        # "Reinicializações máximas" with checkbox
+        f_restarts = ctk.CTkFrame(col1, fg_color="transparent")
+        f_restarts.pack(fill="x", pady=6)
+
+        label_restarts_row = ctk.CTkFrame(f_restarts, fg_color="transparent")
+        label_restarts_row.pack(fill="x", padx=0, pady=(0, 4))
+
+        ctk.CTkLabel(
+            label_restarts_row,
+            text="Reinicializações máximas:",
+            font=("Montserrat UI", 11),
+            text_color=TEXT_MID,
+            anchor="w",
+        ).pack(side="left")
+
+        help_badge(label_restarts_row, "Define a quantidade de vezes a automação irá reiniciar caso o sistema falhe ou venha a cair.").pack(side="left", padx=(6, 0))
+
+        entry_restarts_row = ctk.CTkFrame(f_restarts, fg_color="transparent")
+        entry_restarts_row.pack(fill="x")
+
+        self.entry_restarts = ctk.CTkEntry(
+            entry_restarts_row,
+            width=90,
+            height=28,
+            fg_color=FIELD_BG,
+            border_color=FIELD_BORDER,
+            border_width=1,
+            corner_radius=4,
+            font=("Montserrat UI", 11),
+            text_color=TEXT_DARK,
         )
+        self.entry_restarts.pack(side="left")
+
+        def on_restarts_checkbox_change():
+            if self.var_use_restarts.get():
+                self.entry_restarts.configure(state="normal")
+            else:
+                self.entry_restarts.delete(0, "end")
+                self.entry_restarts.configure(state="disabled")
+
+        ctk.CTkCheckBox(
+            entry_restarts_row,
+            text="Usar limite",
+            variable=self.var_use_restarts,
+            command=on_restarts_checkbox_change,
+            font=("Montserrat UI", 10),
+            text_color=TEXT_MID,
+            fg_color=SIDEBAR_BG,
+            hover_color=SIDEBAR_HOVER,
+            checkmark_color="#FFFFFF",
+            border_color=FIELD_BORDER,
+        ).pack(side="left", padx=(12, 0))
 
         # Vertical separator
         ctk.CTkFrame(cfg_inner, width=1, fg_color=PANEL_BORDER).grid(
