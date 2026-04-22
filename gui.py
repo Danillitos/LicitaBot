@@ -55,7 +55,7 @@ def make_panel(parent, **kwargs):
 def panel_title(parent, icon: str, text: str):
     """Icon + bold title row for a panel."""
     row = ctk.CTkFrame(parent, fg_color="transparent")
-    row.pack(fill="x", padx=16, pady=(14, 8))
+    row.pack(fill="x", padx=6, pady=(14, 8))
     ctk.CTkLabel(
         row, text=icon, font=("Montserrat UI Semibold", 14), text_color=ICON_COLOR
     ).pack(side="left", padx=(0, 6))
@@ -141,6 +141,20 @@ def slider_row(parent, label: str, from_=0, to=100, default=50, entry_width=50):
     slider.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=4)
     entry.pack(side="left")
 
+    def on_entry_change(*_):
+        try:
+            v = int(val_var.get())
+        except ValueError:
+            return
+    
+        clamped = max(from_, min(to, v))
+        if v != clamped:
+            val_var.set(str(clamped))
+
+        slider.set(clamped)
+
+    val_var.trace_add("write", on_entry_change)
+
     return slider, entry
 
 
@@ -166,6 +180,8 @@ class LicitaBotApp(ctk.CTk):
 
         self._build_header()
         self._build_body()
+
+        self.bind_all("<Button-1>", lambda e: self.focus_set() if not isinstance(e.widget, (ctk.CTkEntry, tk.Entry)) else None)
 
     # ── Header ────────────────────────────────────────────────────────────────
     def _build_header(self):
@@ -508,6 +524,8 @@ class LicitaBotApp(ctk.CTk):
         sel = self.listbox.curselection()
         if sel:
             self.listbox.delete(sel[0])
+
+    
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
