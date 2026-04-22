@@ -34,10 +34,50 @@ APP_W = 1440
 APP_H = 900
 
 # ── Folders ───────────────────────────────────────────────────────────────────
-FOLDER_LOGS = Path("Logs").mkdir(exist_ok=True)
-
+FOLDER_LOGS   = Path("Logs").mkdir(exist_ok=True)
 FOLDER_SHEETS = Path("Sheets").mkdir(exist_ok=True)
 sheets = [f for f in Path("Sheets").iterdir() if f.suffix in (".xlsx", ".xls")]
+
+
+# ── Tooltip ───────────────────────────────────────────────────────────────────
+# Defined first so help_badge can reference it below.
+class Tooltip:
+    def __init__(self, widget, text: str):
+        self.widget = widget
+        self.text   = text
+        self.tw     = None
+        widget.bind("<Enter>", self.show)
+        widget.bind("<Leave>", self.hide)
+
+    def show(self, event=None):
+        x = self.widget.winfo_rootx() + self.widget.winfo_width() + 6
+        y = self.widget.winfo_rooty() + (self.widget.winfo_height() // 2)
+
+        self.tw = tk.Toplevel(self.widget)
+        self.tw.wm_overrideredirect(True)
+        self.tw.wm_geometry(f"+{x}+{y}")
+        self.tw.attributes("-topmost", True)
+
+        frame = tk.Frame(self.tw, background=TEXT_DARK, bd=0)
+        frame.pack()
+
+        tk.Label(
+            frame,
+            text=self.text,
+            background=TEXT_DARK,
+            foreground="#FFFFFF",
+            font=("Montserrat UI", 10),
+            wraplength=220,
+            justify="left",
+            padx=10,
+            pady=8,
+        ).pack()
+
+    def hide(self, event=None):
+        if self.tw:
+            self.tw.destroy()
+            self.tw = None
+
 
 # ── Helper widgets ────────────────────────────────────────────────────────────
 def make_panel(parent, **kwargs):
@@ -73,7 +113,6 @@ def divider(parent):
     )
 
 
-
 def info_row(parent, label: str, var: tk.StringVar):
     """Key-value info row."""
     row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -95,15 +134,40 @@ def info_row(parent, label: str, var: tk.StringVar):
     ).pack(side="right")
 
 
-def slider_row(parent, label: str, from_=0, to=100, default=50, entry_width=50):
-    """Label + slider + value entry."""
+def help_badge(parent, tooltip_text: str):
+    """Small ? label that shows a tooltip on hover."""
+    badge = ctk.CTkLabel(
+        parent,
+        text=" ? ",
+        font=("Montserrat UI Semibold", 10),
+        text_color="#FFFFFF",
+        fg_color=SLIDER_FG,
+        corner_radius=10,
+        width=18,
+        height=18,
+        cursor="question_arrow",
+    )
+    Tooltip(badge, tooltip_text)
+    return badge
+
+
+def slider_row(parent, label: str, from_=0, to=100, default=50, entry_width=50, tooltip: str = ""):
+    """Label + slider + value entry, with an optional ? tooltip badge."""
     col = ctk.CTkFrame(parent, fg_color="transparent")
     col.pack(fill="x", padx=12, pady=(6, 2))
 
-    ctk.CTkLabel(
-        col, text=label, font=("Montserrat UI", 11), text_color=TEXT_MID, anchor="w"
-    ).pack(fill="x")
+    # Label row (with optional badge)
+    label_row = ctk.CTkFrame(col, fg_color="transparent")
+    label_row.pack(fill="x")
 
+    ctk.CTkLabel(
+        label_row, text=label, font=("Montserrat UI", 11), text_color=TEXT_MID, anchor="w"
+    ).pack(side="left")
+
+    if tooltip:
+        help_badge(label_row, tooltip).pack(side="left", padx=(6, 0))
+
+    # Slider + entry row
     row = ctk.CTkFrame(col, fg_color="transparent")
     row.pack(fill="x")
 
@@ -146,11 +210,10 @@ def slider_row(parent, label: str, from_=0, to=100, default=50, entry_width=50):
             v = int(val_var.get())
         except ValueError:
             return
-    
+
         clamped = max(from_, min(to, v))
         if v != clamped:
             val_var.set(str(clamped))
-
         slider.set(clamped)
 
     val_var.trace_add("write", on_entry_change)
@@ -171,17 +234,22 @@ class LicitaBotApp(ctk.CTk):
         self.resizable(False, False)
 
         # Info variables
-        self.var_total     = tk.StringVar(value="0")
-        self.var_filled    = tk.StringVar(value="0")
-        self.var_remaining = tk.StringVar(value="0")
-        self.var_inits     = tk.StringVar(value="0")
-        self.var_errors    = tk.StringVar(value="0")
+        self.var_total      = tk.StringVar(value="0")
+        self.var_filled     = tk.StringVar(value="0")
+        self.var_remaining  = tk.StringVar(value="0")
+        self.var_inits      = tk.StringVar(value="0")
+        self.var_errors     = tk.StringVar(value="0")
         self.var_auto_login = tk.BooleanVar(value=False)
 
         self._build_header()
         self._build_body()
 
-        self.bind_all("<Button-1>", lambda e: self.focus_set() if not isinstance(e.widget, (ctk.CTkEntry, tk.Entry)) else None)
+        self.bind_all(
+            "<Button-1>",
+            lambda e: self.focus_set()
+            if not isinstance(e.widget, (ctk.CTkEntry, tk.Entry))
+            else None,
+        )
 
     # ── Header ────────────────────────────────────────────────────────────────
     def _build_header(self):
@@ -189,7 +257,6 @@ class LicitaBotApp(ctk.CTk):
         header.pack(fill="x", side="top")
         header.pack_propagate(False)
 
-        # Logo image (falls back to text if file not found)
         try:
             from PIL import Image
             logo_img = ctk.CTkImage(
@@ -207,31 +274,27 @@ class LicitaBotApp(ctk.CTk):
                 text_color=TEXT_DARK,
             ).pack(side="left", padx=20, pady=14)
 
-        # Bottom border line
         ctk.CTkFrame(self, height=1, fg_color=PANEL_BORDER, corner_radius=0).pack(
             fill="x"
         )
 
-    # ── Body (sidebar + main) ─────────────────────────────────────────────────
+    # ── Body ─────────────────────────────────────────────────────────────────
     def _build_body(self):
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True)
-
         self._build_sidebar(body)
         self._build_main(body)
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
     def _build_sidebar(self, parent):
-        sidebar = ctk.CTkFrame(
-            parent, fg_color=SIDEBAR_BG, width=175, corner_radius=0
-        )
+        sidebar = ctk.CTkFrame(parent, fg_color=SIDEBAR_BG, width=175, corner_radius=0)
         sidebar.pack(fill="y", side="left")
         sidebar.pack_propagate(False)
 
         nav_items = [("Inicio", True)]
         for text, active in nav_items:
             bg = SIDEBAR_ACTIVE if active else SIDEBAR_BG
-            btn = ctk.CTkButton(
+            ctk.CTkButton(
                 sidebar,
                 text=text,
                 font=("Montserrat UI Semibold" if active else "Montserrat UI", 13),
@@ -241,8 +304,7 @@ class LicitaBotApp(ctk.CTk):
                 corner_radius=0,
                 height=42,
                 anchor="center",
-            )
-            btn.pack(fill="x", pady=(0, 1))
+            ).pack(fill="x", pady=(0, 1))
 
     # ── Main content ──────────────────────────────────────────────────────────
     def _build_main(self, parent):
@@ -297,7 +359,6 @@ class LicitaBotApp(ctk.CTk):
         list_inner.columnconfigure(0, weight=1)
         list_inner.rowconfigure(0, weight=1)
 
-        # Listbox (tk native inside a frame for scrolling)
         lb_frame = ctk.CTkFrame(
             list_inner,
             fg_color=LISTBOX_BG,
@@ -322,7 +383,6 @@ class LicitaBotApp(ctk.CTk):
             highlightthickness=0,
         )
         self.listbox.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-
         self.listbox.insert("end", *[f.name for f in sheets])
 
         scrollbar = ctk.CTkScrollbar(lb_frame, command=self.listbox.yview)
@@ -373,8 +433,19 @@ class LicitaBotApp(ctk.CTk):
         # Col 0 – sliders
         col0 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
         col0.grid(row=0, column=0, sticky="nsew", padx=(8, 4))
-        slider_row(col0, "Precisão de correspondência:", from_=0, to=100, default=50)
-        slider_row(col0, "Velocidade de preenchimento:", from_=0, to=100, default=40)
+
+        slider_row(
+            col0,
+            "Precisão de correspondência:",
+            from_=0, to=100, default=85,
+            tooltip="Define o quão rigoroso o algoritmo de correspondência agirá sobre as descrições dos itens. Quanto maior o valor, menor a chance de um item ser preenchido incorretamente, porém maior a chance de falsos negativos, onde itens válidos são rejeitados por não atingirem o limiar exigido.",
+        )
+        slider_row(
+            col0,
+            "Velocidade de preenchimento:",
+            from_=0, to=100, default=50,
+            tooltip="Define a velocidade de preenchimento da automação no sistema TransfereGov. Quanto maior o valor, mais rápido o preenchimento, porém mais instável a automação, aumentando o risco de falhas e interrupções.",
+        )
 
         # Vertical separator
         ctk.CTkFrame(cfg_inner, width=1, fg_color=PANEL_BORDER).grid(
@@ -385,12 +456,24 @@ class LicitaBotApp(ctk.CTk):
         col1 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
         col1.grid(row=0, column=1, sticky="nsew", padx=12)
 
-        def small_labeled_entry(parent, label, width=90):
+        def small_labeled_entry(parent, label, width=90, tooltip=""):
             f = ctk.CTkFrame(parent, fg_color="transparent")
             f.pack(fill="x", pady=6)
+
+            label_row = ctk.CTkFrame(f, fg_color="transparent")
+            label_row.pack(fill="x")
+
             ctk.CTkLabel(
-                f, text=label, font=("Montserrat UI", 11), text_color=TEXT_MID, anchor="w"
-            ).pack(fill="x")
+                label_row,
+                text=label,
+                font=("Montserrat UI", 11),
+                text_color=TEXT_MID,
+                anchor="w",
+            ).pack(side="left")
+
+            if tooltip:
+                help_badge(label_row, tooltip).pack(side="left", padx=(6, 0))
+
             e = ctk.CTkEntry(
                 f,
                 width=width,
@@ -405,20 +488,31 @@ class LicitaBotApp(ctk.CTk):
             e.pack(anchor="w")
             return e
 
-        self.entry_attempts = small_labeled_entry(col1, "Tentativas por item:")
-        self.entry_restarts = small_labeled_entry(col1, "Reinicializações máximas:")
+        self.entry_attempts = small_labeled_entry(
+            col1,
+            "Tentativas por item:",
+            tooltip="Define a quantidade de tentativas de preenchimento serão feitas por item caso o mesmo não seja encontrado no sistema.",
+        )
+        self.entry_restarts = small_labeled_entry(
+            col1,
+            "Reinicializações máximas:",
+            tooltip="Define a quantidade de vezes a automação irá reiniciar caso o sistema falhe ou venha a cair.",
+        )
 
         # Vertical separator
         ctk.CTkFrame(cfg_inner, width=1, fg_color=PANEL_BORDER).grid(
             row=0, column=2, sticky="ns", padx=4, pady=6
         )
 
-        # Col 2 – checkbox
+        # Col 2 – checkbox + badge
         col2 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
         col2.grid(row=0, column=2, sticky="nsew", padx=12)
 
+        cb_row = ctk.CTkFrame(col2, fg_color="transparent")
+        cb_row.pack(anchor="w", pady=10)
+
         ctk.CTkCheckBox(
-            col2,
+            cb_row,
             text="Tentar realizar login\nautomaticamente",
             variable=self.var_auto_login,
             font=("Montserrat UI", 11),
@@ -427,8 +521,11 @@ class LicitaBotApp(ctk.CTk):
             hover_color=SIDEBAR_HOVER,
             checkmark_color="#FFFFFF",
             border_color=FIELD_BORDER,
-        ).pack(anchor="w", pady=10)
+        ).pack(side="left")
 
+        help_badge(cb_row, "Tenta realizar o login no Gov automaticamente. Atenção: Essa função pode não funcionar corretamente.").pack(side="left", padx=(10, 0))
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
     def _browse(self, entry_widget):
         path = filedialog.askopenfilename(
             filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
@@ -466,7 +563,7 @@ class LicitaBotApp(ctk.CTk):
         entry.pack(side="left")
 
         if browse:
-            btn = ctk.CTkButton(
+            ctk.CTkButton(
                 row,
                 text="...",
                 width=28,
@@ -479,18 +576,15 @@ class LicitaBotApp(ctk.CTk):
                 text_color=TEXT_DARK,
                 font=("Montserrat UI", 11),
                 command=lambda e=entry: self._browse(e),
-            )
-            btn.pack(side="left", padx=(4, 0))
+            ).pack(side="left", padx=(4, 0))
 
-        return entry    
-
+        return entry
 
     # ── Button callbacks ──────────────────────────────────────────────────────
     def _select_sheet(self):
         sel = self.listbox.curselection()
         if not sel:
             return
-
         name = self.listbox.get(sel[0])
         path = Path("Sheets").resolve() / name
         self._load_sheet_info(str(path))
@@ -500,19 +594,16 @@ class LicitaBotApp(ctk.CTk):
     def _load_sheet_info(self, path: str):
         try:
             import pandas as pd
-            df = pd.read_excel(path)
-
-            total      = len(df)
-            filled     = int(df.iloc[:, 4].notna().sum() & (df.iloc[:, 4] != 0).sum())
-            # mirror your bot's filter logic exactly
-            mask       = df.iloc[:, 4].notna() & (df.iloc[:, 4] != 0)
-            filled     = int(mask.sum())
-            remaining  = total - filled
+            df        = pd.read_excel(path)
+            total     = len(df)
+            mask      = df.iloc[:, 4].notna() & (df.iloc[:, 4] != 0)
+            filled    = int(mask.sum())
+            remaining = total - filled
 
             self.var_total.set(str(total))
             self.var_filled.set(str(filled))
             self.var_remaining.set(str(remaining))
-            self.var_inits.set("0")   # resets on new sheet load
+            self.var_inits.set("0")
             self.var_errors.set("0")
         except Exception as e:
             self.var_total.set("Erro")
@@ -524,8 +615,6 @@ class LicitaBotApp(ctk.CTk):
         sel = self.listbox.curselection()
         if sel:
             self.listbox.delete(sel[0])
-
-    
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
