@@ -9,13 +9,20 @@ from selenium.common.exceptions import StaleElementReferenceException, TimeoutEx
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.action_chains import ActionChains
 
-# Configurações globais
+# ── Configuration Variables (can be set by GUI) ──────────────────────────────
 PRE_INSTRUMENTO = 'XXXXX'  # INSERIR NUMERO DO INSTRUMENTO A SER EDITADO
 PLANILHA_PATH = 'XXXXX'  # CAMPO DE INSERÇÃO DA PLANILHA ORÇAMENTARIA FORNECIDA PELA CONSTRUTORA
-RELATORIO_PATH = f'relatorio_execucao-{PRE_INSTRUMENTO}.xlsx'
 DEFAULT_TIMEOUT = 60  # Aumentado para lidar com SPA lenta
 SIMILARITY_THRESHOLD = 0.65  # Limiar de similaridade para considerar como match
 MAX_TRIES = 5  # Máximo de tentativas para matching antes de pular
+MAX_RESTARTS = None  # Máximo de reinicializações (None = ilimitado)
+VELOCIDADE_MULTIPLICADOR = 1.0  # Multiplicador de velocidade (1.0 = normal, 0.5 = mais lento, 2.0 = mais rápido)
+
+# Calcular caminhos dinamicamente
+def get_relatorio_path():
+    return f'relatorio_execucao-{PRE_INSTRUMENTO}.xlsx'
+
+RELATORIO_PATH = get_relatorio_path()
 
 # Função para calcular distância de Levenshtein
 def levenshtein_distance(s1, s2):
@@ -226,179 +233,189 @@ def save_or_concat(log_registros, save):
         df_log.to_excel(RELATORIO_PATH, index=False)
     print(f"📊 Relatório salvo em {RELATORIO_PATH}")
 
-# Loop principal com reinício automático
-descricoes, precosUnit = load_data()
-log_registros = []
+# Função principal
+def run_filling():
+    """Main execution function that can be called from GUI or standalone."""
+    global RELATORIO_PATH
+    RELATORIO_PATH = get_relatorio_path()  # Update report path with current instrument number
+    
+    # Loop principal com reinício automático
+    descricoes, precosUnit = load_data()
+    log_registros = []
 
-# Carregar progresso salvo
-try:
-    save = pd.read_excel(RELATORIO_PATH)
-    save_index_per_page = int(save.iloc[-1, 1])
-    save_general_index = int(save.iloc[-1, 0])
-    save_page = int(save.iloc[-1, 2])
-    i = save_index_per_page
-    i_global = save_general_index
-    pagina = save_page
-    print(f"Ponto salvo encontrado! Iniciando da iteração {i_global}, página {pagina+1}, item {i+1}")
-except FileNotFoundError:
-    save = None
-    i = 0
-    i_global = 0
-    pagina = 0
-    print("Ponto salvo não encontrado! Iniciando do zero.")
-except Exception as e:
-    print(f"Erro ao carregar save: {e}")
-    save = None
-    i = 0
-    i_global = 0
-    pagina = 0
-
-while i_global < len(descricoes):
-    driver = None
+    # Carregar progresso salvo
     try:
-        driver = init_driver()
-        if not navigate_and_login(driver):
-            raise Exception("Falha na navegação/login inicial")
-        
-        while i_global < len(descricoes):
-            handle_session_popup(driver)
-            
-            if not go_to_page(driver, pagina):
-                raise TimeoutException("Falha ao navegar para página")
-            
-            icones_editar = get_fresh_edit_icons(driver)
-            
-            if i >= len(icones_editar):
-                print(f"🌐 Fim dos elementos na página {pagina+1}. Avançando...")
-                pagina += 1
-                i = 0
-                continue
-            
-            tentativas = 0
-            while True:
-                for attempt in range(5):  # Tentativas para clicar no editar
-                    try:
-                        icones_editar = get_fresh_edit_icons(driver)
-                        icone = icones_editar[i]
-                        link_editar = icone.find_element(By.XPATH, './parent::a')
-                        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link_editar)
-                        time.sleep(1)
-                        driver.execute_script("arguments[0].click();", link_editar)
-                        break
-                    except StaleElementReferenceException as e:
-                        print(f"🔄 Elemento stale na iteração {i_global}, tentativa {attempt+1}: {e}")
-                        time.sleep(3)
-                else:
-                    raise StaleElementReferenceException("Falha persistente em stale element ao clicar edit")
+        save = pd.read_excel(RELATORIO_PATH)
+        save_index_per_page = int(save.iloc[-1, 1])
+        save_general_index = int(save.iloc[-1, 0])
+        save_page = int(save.iloc[-1, 2])
+        i = save_index_per_page
+        i_global = save_general_index
+        pagina = save_page
+        print(f"Ponto salvo encontrado! Iniciando da iteração {i_global}, página {pagina+1}, item {i+1}")
+    except FileNotFoundError:
+        save = None
+        i = 0
+        i_global = 0
+        pagina = 0
+        print("Ponto salvo não encontrado! Iniciando do zero.")
+    except Exception as e:
+        print(f"Erro ao carregar save: {e}")
+        save = None
+        i = 0
+        i_global = 0
+        pagina = 0
 
-                time.sleep(3)  # Delay para form carregar
-                
+    while i_global < len(descricoes):
+        driver = None
+        try:
+            driver = init_driver()
+            if not navigate_and_login(driver):
+                raise Exception("Falha na navegação/login inicial")
+            
+            while i_global < len(descricoes):
                 handle_session_popup(driver)
                 
-                try:
-                    WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'input[formcontrolname="precoUnitarioLicitado"]')))
-                except TimeoutException as e:
-                    print(f"Timeout esperando campo de preço unitário: {e}")
-                    raise
+                if not go_to_page(driver, pagina):
+                    raise TimeoutException("Falha ao navegar para página")
                 
-                valor_atual = driver.execute_script("return document.querySelector('input[formcontrolname=\"precoUnitarioLicitado\"]').value;")
-                descricao_site = driver.execute_script("return document.querySelector('p[id=\"descricao\"]').innerText;")
+                icones_editar = get_fresh_edit_icons(driver)
                 
-                print(f"🗒️ Iteração {i_global}: Descrição site -> {descricao_site}")
-                print(f"🗒️ Iteração {i_global}: Descrição planilha -> {descricoes[i_global]}")
+                if i >= len(icones_editar):
+                    print(f"🌐 Fim dos elementos na página {pagina+1}. Avançando...")
+                    pagina += 1
+                    i = 0
+                    continue
                 
-                # Calcular similaridade
-                sim = similarity(descricao_site, descricoes[i_global])
-                print(f"📏 Similaridade Levenshtein: {sim:.2f}")
-                
-                if sim >= SIMILARITY_THRESHOLD:
-                    print('✅ Descrições semelhantes o suficiente.')
+                tentativas = 0
+                while True:
+                    for attempt in range(5):  # Tentativas para clicar no editar
+                        try:
+                            icones_editar = get_fresh_edit_icons(driver)
+                            icone = icones_editar[i]
+                            link_editar = icone.find_element(By.XPATH, './parent::a')
+                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link_editar)
+                            time.sleep(1)
+                            driver.execute_script("arguments[0].click();", link_editar)
+                            break
+                        except StaleElementReferenceException as e:
+                            print(f"🔄 Elemento stale na iteração {i_global}, tentativa {attempt+1}: {e}")
+                            time.sleep(3)
+                    else:
+                        raise StaleElementReferenceException("Falha persistente em stale element ao clicar edit")
+
+                    time.sleep(3)  # Delay para form carregar
                     
-                    print(f"🖌️ Iteração {i_global}: Substituindo {valor_atual} por {precosUnit[i_global]}...")
+                    handle_session_popup(driver)
                     
-                    if not js_click(driver, 'input[formcontrolname="precoUnitarioLicitado"]', 'write', precosUnit[i_global]):
-                        raise Exception("Falha ao escrever valor")
+                    try:
+                        WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'input[formcontrolname="precoUnitarioLicitado"]')))
+                    except TimeoutException as e:
+                        print(f"Timeout esperando campo de preço unitário: {e}")
+                        raise
                     
-                    print(f"✅ Iteração {i_global}: Valor inserido com sucesso!")
-                    time.sleep(2)
+                    valor_atual = driver.execute_script("return document.querySelector('input[formcontrolname=\"precoUnitarioLicitado\"]').value;")
+                    descricao_site = driver.execute_script("return document.querySelector('p[id=\"descricao\"]').innerText;")
                     
-                    if not js_click(driver, 'button[class="btn btn-primary"]'):
-                        raise Exception("Falha ao clicar em salvar")
+                    print(f"🗒️ Iteração {i_global}: Descrição site -> {descricao_site}")
+                    print(f"🗒️ Iteração {i_global}: Descrição planilha -> {descricoes[i_global]}")
                     
-                    WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CLASS_NAME, 'table')))
-                    time.sleep(2)  # Delay adicional após salvar
+                    # Calcular similaridade
+                    sim = similarity(descricao_site, descricoes[i_global])
+                    print(f"📏 Similaridade Levenshtein: {sim:.2f}")
                     
-                    log_registros.append({
-                        "Iteração Geral": i_global,
-                        "Iteração na pagina": i,
-                        "Pagina": pagina,
-                        "Descricao_Site": descricao_site,
-                        "Descricao_Planilha": descricoes[i_global],
-                        "Preco_Atual": valor_atual,
-                        "Preco_Novo": precosUnit[i_global],
-                        "Similaridade": sim,
-                        "Status": "OK",
-                        "Obs": ""
-                    })
-                    
-                    i += 1
-                    i_global += 1
-                    break  # Sai do loop de tentativas
-                    
-                else:
-                    obs = f"Descrições divergentes (similaridade {sim:.2f} < {SIMILARITY_THRESHOLD})"
-                    print(f'⚠️ Atenção. {obs}! Favor verificar. Tentando novamente após voltar...')
-                    
-                    # Clique no botão "Voltar" específico
-                    if not js_click(driver, 'button.btn.btn-secondary.botao-voltar'):
-                        print("Falha ao clicar no botão Voltar com .btn.btn-secondary.botao-voltar. Tentando fallback...")
-                        js_click(driver, 'button.botao-voltar')
-                    
-                    WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CLASS_NAME, 'table')))
-                    time.sleep(2)  # Delay após voltar
-                    
-                    # Log da tentativa falha
-                    log_registros.append({
-                        "Iteração Geral": i_global,
-                        "Iteração na pagina": i,
-                        "Pagina": pagina,
-                        "Descricao_Site": descricao_site,
-                        "Descricao_Planilha": descricoes[i_global],
-                        "Preco_Atual": valor_atual,
-                        "Preco_Novo": precosUnit[i_global],
-                        "Similaridade": sim,
-                        "Status": "MISMATCH",
-                        "Obs": obs + f" - Tentativa {tentativas + 1}"
-                    })
-                    
-                    tentativas += 1
-                    if tentativas >= MAX_TRIES:
-                        print(f"🚫 Máximo de tentativas ({MAX_TRIES}) atingido para iteração {i_global}. Pulando item...")
-                        log_registros[-1]["Status"] = "SKIPPED"
-                        log_registros[-1]["Obs"] += " - Pulado após max tentativas"
+                    if sim >= SIMILARITY_THRESHOLD:
+                        print('✅ Descrições semelhantes o suficiente.')
+                        
+                        print(f"🖌️ Iteração {i_global}: Substituindo {valor_atual} por {precosUnit[i_global]}...")
+                        
+                        if not js_click(driver, 'input[formcontrolname="precoUnitarioLicitado"]', 'write', precosUnit[i_global]):
+                            raise Exception("Falha ao escrever valor")
+                        
+                        print(f"✅ Iteração {i_global}: Valor inserido com sucesso!")
+                        time.sleep(2)
+                        
+                        if not js_click(driver, 'button[class="btn btn-primary"]'):
+                            raise Exception("Falha ao clicar em salvar")
+                        
+                        WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CLASS_NAME, 'table')))
+                        time.sleep(2)  # Delay adicional após salvar
+                        
+                        log_registros.append({
+                            "Iteração Geral": i_global,
+                            "Iteração na pagina": i,
+                            "Pagina": pagina,
+                            "Descricao_Site": descricao_site,
+                            "Descricao_Planilha": descricoes[i_global],
+                            "Preco_Atual": valor_atual,
+                            "Preco_Novo": precosUnit[i_global],
+                            "Similaridade": sim,
+                            "Status": "OK",
+                            "Obs": ""
+                        })
+                        
                         i += 1
                         i_global += 1
-                        break
-                    # Continua o loop para tentar novamente o mesmo item
+                        break  # Sai do loop de tentativas
+                        
+                    else:
+                        obs = f"Descrições divergentes (similaridade {sim:.2f} < {SIMILARITY_THRESHOLD})"
+                        print(f'⚠️ Atenção. {obs}! Favor verificar. Tentando novamente após voltar...')
+                        
+                        # Clique no botão "Voltar" específico
+                        if not js_click(driver, 'button.btn.btn-secondary.botao-voltar'):
+                            print("Falha ao clicar no botão Voltar com .btn.btn-secondary.botao-voltar. Tentando fallback...")
+                            js_click(driver, 'button.botao-voltar')
+                        
+                        WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CLASS_NAME, 'table')))
+                        time.sleep(2)  # Delay após voltar
+                        
+                        # Log da tentativa falha
+                        log_registros.append({
+                            "Iteração Geral": i_global,
+                            "Iteração na pagina": i,
+                            "Pagina": pagina,
+                            "Descricao_Site": descricao_site,
+                            "Descricao_Planilha": descricoes[i_global],
+                            "Preco_Atual": valor_atual,
+                            "Preco_Novo": precosUnit[i_global],
+                            "Similaridade": sim,
+                            "Status": "MISMATCH",
+                            "Obs": obs + f" - Tentativa {tentativas + 1}"
+                        })
+                        
+                        tentativas += 1
+                        if tentativas >= MAX_TRIES:
+                            print(f"🚫 Máximo de tentativas ({MAX_TRIES}) atingido para iteração {i_global}. Pulando item...")
+                            log_registros[-1]["Status"] = "SKIPPED"
+                            log_registros[-1]["Obs"] += " - Pulado após max tentativas"
+                            i += 1
+                            i_global += 1
+                            break
+                        # Continua o loop para tentar novamente o mesmo item
+                
+                if i_global % 10 == 0:
+                    save_or_concat(log_registros, save)
+                    log_registros = []
+                    save = pd.read_excel(RELATORIO_PATH)
             
-            if i_global % 10 == 0:
+        except Exception as e:
+            print(f"⚠️ Erro crítico na iteração {i_global}: {e}. Reiniciando processo...")
+            if log_registros:
                 save_or_concat(log_registros, save)
                 log_registros = []
-                save = pd.read_excel(RELATORIO_PATH)
-        
-    except Exception as e:
-        print(f"⚠️ Erro crítico na iteração {i_global}: {e}. Reiniciando processo...")
-        if log_registros:
-            save_or_concat(log_registros, save)
-            log_registros = []
-        if driver:
-            driver.quit()
-        time.sleep(10)  # Delay maior antes de reiniciar
-        continue
+            if driver:
+                driver.quit()
+            time.sleep(10)  # Delay maior antes de reiniciar
+            continue
 
-# Salvar relatório final
-if log_registros:
-    save_or_concat(log_registros, save)
+    # Salvar relatório final
+    if log_registros:
+        save_or_concat(log_registros, save)
 
-if driver:
-    driver.quit()
+    if driver:
+        driver.quit()
+
+# Entry point
+if __name__ == "__main__":
+    run_filling()

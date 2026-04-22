@@ -2,6 +2,7 @@ import customtkinter as ctk
 from tkinter import filedialog
 import tkinter as tk
 from pathlib import Path
+import json
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("light")
@@ -37,6 +38,18 @@ APP_H = 900
 FOLDER_LOGS   = Path("Logs").mkdir(exist_ok=True)
 FOLDER_SHEETS = Path("Sheets").mkdir(exist_ok=True)
 sheets = [f for f in Path("Sheets").iterdir() if f.suffix in (".xlsx", ".xls")]
+
+# ── Default Configuration ─────────────────────────────────────────────────────
+CONFIG_FILE = Path("config.json")
+
+DEFAULT_CONFIG = {
+    "precisao_correspondencia": 85,
+    "velocidade_preenchimento": 50,
+    "tentativas_por_item": 3,
+    "reinicializacoes_maximas": 5,
+    "usar_limite_reinicializacoes": True,
+    "tentar_login_automaticamente": False,
+}
 
 
 # ── Tooltip ───────────────────────────────────────────────────────────────────
@@ -241,9 +254,20 @@ class LicitaBotApp(ctk.CTk):
         self.var_errors          = tk.StringVar(value="0")
         self.var_auto_login      = tk.BooleanVar(value=False)
         self.var_use_restarts    = tk.BooleanVar(value=True)
+        
+        # Configuration sliders and entries (will be created in _build_main)
+        self.slider_precisao     = None
+        self.slider_velocidade   = None
+        self.entry_attempts      = None
+        self.entry_restarts      = None
+        
+        # Message display
+        self.message_display     = None
 
         self._build_header()
         self._build_body()
+        self._build_footer()
+        self._load_config()
 
         self.bind_all(
             "<Button-1>",
@@ -424,7 +448,60 @@ class LicitaBotApp(ctk.CTk):
             row=2, column=0, columnspan=2, padx=14, pady=(0, 14), sticky="nsew"
         )
 
-        panel_title(p_cfg, "⚙", "Configurações")
+        # Custom title with buttons
+        title_row = ctk.CTkFrame(p_cfg, fg_color="transparent")
+        title_row.pack(fill="x", padx=6, pady=(14, 8))
+        
+        ctk.CTkLabel(
+            title_row, text="⚙", font=("Montserrat UI Semibold", 14), text_color=ICON_COLOR
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(
+            title_row,
+            text="Configurações",
+            font=("Montserrat UI Semibold", 13),
+            text_color=TEXT_DARK,
+        ).pack(side="left")
+        
+        # Buttons on the right
+        buttons_frame = ctk.CTkFrame(title_row, fg_color="transparent")
+        buttons_frame.pack(side="right", padx=0)
+        
+        ctk.CTkButton(
+            buttons_frame,
+            text="Salvar Configuração",
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_H,
+            text_color="#FFFFFF",
+            font=("Montserrat UI Semibold", 10),
+            height=28,
+            corner_radius=4,
+            command=self._save_config,
+        ).pack(side="left", padx=4)
+        
+        ctk.CTkButton(
+            buttons_frame,
+            text="Carregar Configuração Salva",
+            fg_color=SIDEBAR_BG,
+            hover_color=SIDEBAR_HOVER,
+            text_color="#FFFFFF",
+            font=("Montserrat UI Semibold", 10),
+            height=28,
+            corner_radius=4,
+            command=self._load_saved_config,
+        ).pack(side="left", padx=4)
+        
+        ctk.CTkButton(
+            buttons_frame,
+            text="Carregar Configuração Padrão",
+            fg_color=ACCENT_RED,
+            hover_color=ACCENT_RED_H,
+            text_color="#FFFFFF",
+            font=("Montserrat UI Semibold", 10),
+            height=28,
+            corner_radius=4,
+            command=self._load_default_config,
+        ).pack(side="left", padx=4)
+        
         divider(p_cfg)
 
         cfg_inner = ctk.CTkFrame(p_cfg, fg_color="transparent")
@@ -435,13 +512,13 @@ class LicitaBotApp(ctk.CTk):
         col0 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
         col0.grid(row=0, column=0, sticky="nsew", padx=(8, 4))
 
-        slider_row(
+        self.slider_precisao, self.entry_precisao = slider_row(
             col0,
             "Precisão de correspondência:",
             from_=0, to=100, default=85,
             tooltip="Define o quão rigoroso o algoritmo de correspondência agirá sobre as descrições dos itens. Quanto maior o valor, menor a chance de um item ser preenchido incorretamente, porém maior a chance de falsos negativos, onde itens válidos são rejeitados por não atingirem o limiar exigido.",
         )
-        slider_row(
+        self.slider_velocidade, self.entry_velocidade = slider_row(
             col0,
             "Velocidade de preenchimento:",
             from_=0, to=100, default=50,
@@ -574,6 +651,80 @@ class LicitaBotApp(ctk.CTk):
 
         help_badge(cb_row, "Tenta realizar o login no Gov automaticamente. Atenção: Essa função pode não funcionar corretamente.").pack(side="left", padx=(10, 0))
 
+        # Bottom footer with "Iniciar Preenchimento" button
+        footer_frame = ctk.CTkFrame(p_cfg, fg_color="transparent")
+        footer_frame.pack(fill="x", padx=12, pady=(10, 12))
+        footer_frame.pack_propagate(False)
+        
+        ctk.CTkButton(
+            footer_frame,
+            text="Iniciar Preenchimento",
+            fg_color=ACCENT_GREEN,
+            hover_color=ACCENT_GREEN_H,
+            text_color="#FFFFFF",
+            font=("Montserrat UI Semibold", 12),
+            height=36,
+            width=200,
+            corner_radius=6,
+            command=self._start_filling,
+        ).pack(side="right", anchor="e")
+
+    # ── Footer with message display ────────────────────────────────────────────
+    def _build_footer(self):
+        footer = ctk.CTkFrame(self, fg_color=PANEL_BG, height=120, corner_radius=0)
+        footer.pack(fill="x", side="bottom", padx=14, pady=(0, 14))
+        footer.pack_propagate(False)
+
+        # Border on top
+        ctk.CTkFrame(footer, height=1, fg_color=PANEL_BORDER).pack(fill="x", pady=(0, 8))
+
+        # Message display with scrollbar
+        msg_frame = ctk.CTkFrame(footer, fg_color=LISTBOX_BG, border_width=1, border_color=FIELD_BORDER, corner_radius=4)
+        msg_frame.pack(fill="both", expand=True, padx=0, pady=(0, 8))
+        msg_frame.columnconfigure(0, weight=1)
+        msg_frame.rowconfigure(0, weight=1)
+
+        self.message_display = tk.Text(
+            msg_frame,
+            bg=LISTBOX_BG,
+            fg=TEXT_DARK,
+            font=("Montserrat UI", 10),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            wrap="word",
+            height=4,
+        )
+        self.message_display.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+
+        scrollbar = ctk.CTkScrollbar(msg_frame, command=self.message_display.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.message_display.configure(yscrollcommand=scrollbar.set)
+
+        # Configure text tags for different message types
+        self.message_display.tag_config("success", foreground="#4A7C59")
+        self.message_display.tag_config("error", foreground="#8B3A3A")
+        self.message_display.tag_config("info", foreground="#2D4A5A")
+        self.message_display.tag_config("warning", foreground="#D4A574")
+
+    def show_message(self, message: str, msg_type: str = "info"):
+        """Display a message in the GUI message area.
+        msg_type: 'success', 'error', 'info', 'warning'
+        """
+        if self.message_display is None:
+            return
+
+        # Add timestamp
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        
+        # Add message with tag
+        self.message_display.insert("end", f"[{timestamp}] {message}\n", msg_type)
+        
+        # Auto-scroll to bottom
+        self.message_display.see("end")
+        self.update()
+
     # ── Helpers ───────────────────────────────────────────────────────────────
     def _browse(self, entry_widget):
         path = filedialog.askopenfilename(
@@ -664,6 +815,207 @@ class LicitaBotApp(ctk.CTk):
         sel = self.listbox.curselection()
         if sel:
             self.listbox.delete(sel[0])
+
+    def _start_filling(self):
+        """Validate inputs and start the filling process."""
+        # Validation
+        errors = []
+        
+        if not self.entry_num.get().strip():
+            errors.append("• Número do Instrumento é obrigatório")
+        
+        if not self.entry_dir.get().strip():
+            errors.append("• Diretório da planilha é obrigatório")
+        
+        if not self.entry_precisao.get().strip():
+            errors.append("• Precisão de correspondência é obrigatória")
+        
+        if not self.entry_velocidade.get().strip():
+            errors.append("• Velocidade de preenchimento é obrigatória")
+        
+        if not self.entry_attempts.get().strip():
+            errors.append("• Tentativas por item é obrigatória")
+        
+        if self.var_use_restarts.get() and not self.entry_restarts.get().strip():
+            errors.append("• Reinicializações máximas é obrigatória (desmarque se não usar limite)")
+        
+        if errors:
+            error_msg = "Preencha todos os campos obrigatórios:\n\n" + "\n".join(errors)
+            self.show_message(error_msg, "error")
+            return
+        
+        # Prepare configuration
+        config = {
+            "instrumento": self.entry_num.get().strip(),
+            "planilha_path": self.entry_dir.get().strip(),
+            "precisao": float(self.entry_precisao.get()),
+            "velocidade": float(self.entry_velocidade.get()),
+            "tentativas": int(self.entry_attempts.get()),
+            "reinicializacoes": int(self.entry_restarts.get()) if self.var_use_restarts.get() else None,
+            "usar_limite_reinicializacoes": self.var_use_restarts.get(),
+        }
+        
+        msg_lines = [
+            "✓ Iniciando preenchimento com as seguintes configurações:",
+            f"  → Instrumento: {config['instrumento']}",
+            f"  → Planilha: {config['planilha_path']}",
+            f"  → Precisão: {config['precisao']}",
+            f"  → Velocidade: {config['velocidade']}",
+            f"  → Tentativas: {config['tentativas']}",
+        ]
+        if config['usar_limite_reinicializacoes']:
+            msg_lines.append(f"  → Reinicializações máximas: {config['reinicializacoes']}")
+        else:
+            msg_lines.append(f"  → Reinicializações: Ilimitado")
+        
+        self.show_message("\n".join(msg_lines), "success")
+        
+        # Call main.py with the configuration
+        self._call_main(config)
+
+    def _call_main(self, config: dict):
+        """Call main.py with the provided configuration."""
+        import sys
+        import importlib.util
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        
+        try:
+            # Load main.py as a module
+            spec = importlib.util.spec_from_file_location("main", "main.py")
+            main_module = importlib.util.module_from_spec(spec)
+            
+            # Set configuration variables BEFORE loading the module
+            main_module.PRE_INSTRUMENTO = config['instrumento']
+            main_module.PLANILHA_PATH = config['planilha_path']
+            main_module.SIMILARITY_THRESHOLD = 1 - (config['precisao'] / 100)  # Convert percentage to threshold
+            main_module.MAX_TRIES = config['tentativas']
+            main_module.MAX_RESTARTS = config['reinicializacoes'] if config['usar_limite_reinicializacoes'] else None
+            
+            # Calculate the velocity multiplier (0.5 = slower, 2.0 = faster)
+            main_module.VELOCIDADE_MULTIPLICADOR = config['velocidade'] / 50.0
+            
+            sys.modules['main'] = main_module
+            spec.loader.exec_module(main_module)
+            
+            # Capture stdout and stderr to redirect to GUI
+            stdout_capture = io.StringIO()
+            stderr_capture = io.StringIO()
+            
+            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+                main_module.run_filling()
+            
+            # Display captured output in GUI
+            stdout_output = stdout_capture.getvalue()
+            stderr_output = stderr_capture.getvalue()
+            
+            if stdout_output:
+                for line in stdout_output.strip().split('\n'):
+                    if line.strip():
+                        self.show_message(line, "info")
+            
+            if stderr_output:
+                for line in stderr_output.strip().split('\n'):
+                    if line.strip():
+                        self.show_message(line, "error")
+            
+            self.show_message("✓ Preenchimento concluído!", "success")
+        except Exception as e:
+            error_msg = f"✗ Erro ao executar preenchimento: {e}"
+            self.show_message(error_msg, "error")
+            import traceback
+            traceback.print_exc()
+
+    # ── Configuration Management ──────────────────────────────────────────────
+    def _save_config(self):
+        """Save current configuration to JSON file."""
+        try:
+            # Validate and get values with defaults
+            precisao = self.entry_precisao.get() or "85"
+            velocidade = self.entry_velocidade.get() or "50"
+            tentativas = self.entry_attempts.get() or "3"
+            reinicializacoes = self.entry_restarts.get() or "5" if self.var_use_restarts.get() else "0"
+            
+            config = {
+                "precisao_correspondencia": int(precisao),
+                "velocidade_preenchimento": int(velocidade),
+                "tentativas_por_item": int(tentativas),
+                "reinicializacoes_maximas": int(reinicializacoes),
+                "usar_limite_reinicializacoes": self.var_use_restarts.get(),
+                "tentar_login_automaticamente": self.var_auto_login.get(),
+            }
+            
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(config, f, indent=4)
+            
+            self.show_message("✓ Configuração salva com sucesso!", "success")
+        except Exception as e:
+            self.show_message(f"✗ Erro ao salvar configuração: {e}", "error")
+
+    def _load_config(self):
+        """Load configuration from JSON file on startup."""
+        if CONFIG_FILE.exists():
+            try:
+                with open(CONFIG_FILE, "r") as f:
+                    config = json.load(f)
+                
+                # Wait for widgets to be created before loading
+                self.after(100, lambda: self._apply_config(config))
+            except Exception as e:
+                self.show_message(f"Erro ao carregar configuração: {e}", "warning")
+
+    def _load_saved_config(self):
+        """Load saved configuration from JSON file."""
+        if not CONFIG_FILE.exists():
+            self.show_message("✗ Nenhuma configuração salva encontrada!", "error")
+            return
+        
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+            
+            self._apply_config(config)
+            self.show_message("✓ Configuração carregada com sucesso!", "success")
+        except Exception as e:
+            self.show_message(f"✗ Erro ao carregar configuração: {e}", "error")
+
+    def _load_default_config(self):
+        """Load default configuration."""
+        self._apply_config(DEFAULT_CONFIG)
+        self.show_message("✓ Configuração padrão carregada!", "success")
+
+    def _apply_config(self, config: dict):
+        """Apply configuration values to the UI."""
+        try:
+            # Only apply if widgets are initialized
+            if self.entry_precisao is None:
+                return
+            
+            self.entry_precisao.delete(0, "end")
+            self.entry_precisao.insert(0, str(config.get("precisao_correspondencia", DEFAULT_CONFIG["precisao_correspondencia"])))
+            self.slider_precisao.set(float(self.entry_precisao.get()))
+            
+            self.entry_velocidade.delete(0, "end")
+            self.entry_velocidade.insert(0, str(config.get("velocidade_preenchimento", DEFAULT_CONFIG["velocidade_preenchimento"])))
+            self.slider_velocidade.set(float(self.entry_velocidade.get()))
+            
+            self.entry_attempts.delete(0, "end")
+            self.entry_attempts.insert(0, str(config.get("tentativas_por_item", DEFAULT_CONFIG["tentativas_por_item"])))
+            
+            use_limit = config.get("usar_limite_reinicializacoes", DEFAULT_CONFIG["usar_limite_reinicializacoes"])
+            self.var_use_restarts.set(use_limit)
+            
+            if use_limit:
+                self.entry_restarts.configure(state="normal")
+                self.entry_restarts.delete(0, "end")
+                self.entry_restarts.insert(0, str(config.get("reinicializacoes_maximas", DEFAULT_CONFIG["reinicializacoes_maximas"])))
+            else:
+                self.entry_restarts.delete(0, "end")
+                self.entry_restarts.configure(state="disabled")
+            
+            self.var_auto_login.set(config.get("tentar_login_automaticamente", DEFAULT_CONFIG["tentar_login_automaticamente"]))
+        except Exception as e:
+            print(f"Erro ao aplicar configuração: {e}")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
