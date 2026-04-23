@@ -1,13 +1,14 @@
 import customtkinter as ctk
 from tkinter import filedialog
 import tkinter as tk
-from pathlib import Path
 from ui.constants import *
 from ui.widgets import *
 from logic.config_manager import *
 from logic.sheet_loader import *
 from ui.panels.instrumento import build_instrumento
 from ui.panels.info import build_info
+from ui.panels.sheets import build_sheets
+from ui.panels.configuracoes import build_configuracoes
 
 
 # ── Appearance ────────────────────────────────────────────────────────────────
