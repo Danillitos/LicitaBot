@@ -20,9 +20,14 @@ VELOCIDADE_MULTIPLICADOR = 1.0  # Multiplicador de velocidade (1.0 = normal, 0.5
 
 # Calcular caminhos dinamicamente
 def get_relatorio_path():
-    return f'relatorio_execucao-{PRE_INSTRUMENTO}.xlsx'
+    return f'Logs/relatorio_execucao-{PRE_INSTRUMENTO}.xlsx'
 
 RELATORIO_PATH = get_relatorio_path()
+
+# ── Sleep helper with velocity control ────────────────────────────────────────
+def velocity_sleep(base_seconds):
+    actual_sleep = base_seconds * VELOCIDADE_MULTIPLICADOR
+    time.sleep(actual_sleep)
 
 # Função para calcular distância de Levenshtein
 def levenshtein_distance(s1, s2):
@@ -74,7 +79,7 @@ def get_fresh_edit_icons(driver):
                 EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'i.fa.fa-pencil'))
             )
         except (StaleElementReferenceException, TimeoutException):
-            time.sleep(2)
+            velocity_sleep(2)
     raise TimeoutException("Falha ao obter ícones de edição após retries")
 
 # Função genérica para clique via JS com mais retries e delay maior
@@ -83,7 +88,7 @@ def js_click(driver, css, action='click', text='', retries=10, delay=2):
         try:
             element = WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.element_to_be_clickable((By.CSS_SELECTOR, css)))
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-            time.sleep(0.5)
+            velocity_sleep(0.5)
             if action == 'click':
                 driver.execute_script("arguments[0].click();", element)
             elif action == 'write':
@@ -91,7 +96,7 @@ def js_click(driver, css, action='click', text='', retries=10, delay=2):
             return True
         except (StaleElementReferenceException, TimeoutException, ElementClickInterceptedException) as e:
             print(f"⚠️ Tentativa {attempt+1} falhou em {css}: {type(e).__name__} - {e}")
-            time.sleep(delay)
+            velocity_sleep(delay)
     return False
 
 # Função para clique via XPath com waits maiores
@@ -120,7 +125,7 @@ def go_to_page(driver, page_num):
                 driver.execute_script("arguments[0].scrollIntoView(true);", button)
                 ActionChains(driver).move_to_element(button).click().perform()
                 WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'i.fa.fa-pencil')))
-                time.sleep(2)  # Delay adicional após navegação
+                velocity_sleep(2)  # Delay adicional após navegação
                 return True
         
         current_page = pagina_atual(driver)
@@ -130,7 +135,7 @@ def go_to_page(driver, page_num):
             driver.execute_script("arguments[0].click();", next_button)
             WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.staleness_of(next_button))
             WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'i.fa.fa-pencil')))
-            time.sleep(2)  # Delay adicional
+            velocity_sleep(2)  # Delay adicional
         return True
     except TimeoutException:
         print(f"Timeout ao navegar para página {page_num+1}")
@@ -167,52 +172,52 @@ def navigate_and_login(driver):
     try:
         if not click_and_write(driver, '/html/body/portal-root/br-main-layout/div/div/div/main/portal-main/div/div[2]/div[2]/card/div/div/div[3]/button', 'click'):
             raise Exception("Falha ao clicar no botão inicial")
-        time.sleep(1)  # Delay para SPA
+        velocity_sleep(1)  # Delay para SPA
         if not click_and_write(driver, '//*[@id="form_submit_login"]', 'click'):
             raise Exception("Falha ao clicar no submit login")
-        time.sleep(1)
+        velocity_sleep(1)
 
         pyautogui.alert('Por favor, faça o login e realize o captcha. Em seguida, pressione OK para continuar')
 
         if not click_and_write(driver, '//*[@id="menuPrincipal"]/div[1]/div[4]', 'click'):
             raise Exception("Falha ao clicar no menu principal")
-        time.sleep(1)
+        velocity_sleep(1)
         if not click_and_write(driver, '//*[@id="contentMenu"]/div[1]/ul/li[11]/a', 'click'):
             raise Exception("Falha ao clicar no item de menu")
-        time.sleep(1)
+        velocity_sleep(1)
         if not click_and_write(driver, '//*[@id="consultarNumeroConvenio"]', 'write', PRE_INSTRUMENTO):
             raise Exception("Falha ao escrever número do convênio")
-        time.sleep(1)
+        velocity_sleep(1)
         if not click_and_write(driver, '//*[@id="form_submit"]', 'click'):
             raise Exception("Falha ao submeter formulário")
-        time.sleep(1)
+        velocity_sleep(1)
         if not click_and_write(driver, '//*[@id="instrumentoId"]/a', 'click'):
             raise Exception("Falha ao clicar no instrumento ID")
-        time.sleep(1)
+        velocity_sleep(1)
 
         if not click_and_write(driver, '//*[@id="div_-481524888"]/span', 'click'):
             raise Exception("Falha ao clicar na div span")
-        time.sleep(1)
+        velocity_sleep(1)
         if not click_and_write(driver, '//*[@id="menu_link_-481524888_-333124204"]/div/span/span', 'click'):
             raise Exception("Falha ao clicar no menu link")
-        time.sleep(1)
+        velocity_sleep(1)
 
         if not js_click(driver, 'a[title="Exibir Dados Detalhados"]'):
             raise Exception("Falha ao clicar em Exibir Dados Detalhados")
-        time.sleep(1)
+        velocity_sleep(1)
         if not js_click(driver, 'a[title="Planilhas Orçamentárias / Cronogramas Físico Financeiro"]'):
             raise Exception("Falha ao clicar em Planilhas Orçamentárias")
-        time.sleep(1)
+        velocity_sleep(1)
 
         metas = get_fresh_edit_icons(driver)
         meta = metas[0]
         icone_meta = meta.find_element(By.XPATH, './parent::a')
         driver.execute_script('arguments[0].click()', icone_meta)
-        time.sleep(1)
+        velocity_sleep(1)
 
         if not js_click(driver, 'a[title="Planilha Orçamentária"]'):
             raise Exception("Falha ao clicar em Planilha Orçamentária")
-        time.sleep(1)
+        velocity_sleep(1)
 
         WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'i.fa.fa-pencil')))
 
@@ -295,16 +300,16 @@ def run_filling():
                             icone = icones_editar[i]
                             link_editar = icone.find_element(By.XPATH, './parent::a')
                             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link_editar)
-                            time.sleep(1)
+                            velocity_sleep(1)
                             driver.execute_script("arguments[0].click();", link_editar)
                             break
                         except StaleElementReferenceException as e:
                             print(f"🔄 Elemento stale na iteração {i_global}, tentativa {attempt+1}: {e}")
-                            time.sleep(3)
+                            velocity_sleep(3)
                     else:
                         raise StaleElementReferenceException("Falha persistente em stale element ao clicar edit")
 
-                    time.sleep(3)  # Delay para form carregar
+                    velocity_sleep(3)  # Delay para form carregar
                     
                     handle_session_popup(driver)
                     
@@ -333,13 +338,13 @@ def run_filling():
                             raise Exception("Falha ao escrever valor")
                         
                         print(f"✅ Iteração {i_global}: Valor inserido com sucesso!")
-                        time.sleep(2)
+                        velocity_sleep(2)
                         
                         if not js_click(driver, 'button[class="btn btn-primary"]'):
                             raise Exception("Falha ao clicar em salvar")
                         
                         WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CLASS_NAME, 'table')))
-                        time.sleep(2)  # Delay adicional após salvar
+                        velocity_sleep(2)  # Delay adicional após salvar
                         
                         log_registros.append({
                             "Iteração Geral": i_global,
@@ -368,7 +373,7 @@ def run_filling():
                             js_click(driver, 'button.botao-voltar')
                         
                         WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CLASS_NAME, 'table')))
-                        time.sleep(2)  # Delay após voltar
+                        velocity_sleep(2)  # Delay após voltar
                         
                         # Log da tentativa falha
                         log_registros.append({

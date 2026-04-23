@@ -43,6 +43,8 @@ sheets = [f for f in Path("Sheets").iterdir() if f.suffix in (".xlsx", ".xls")]
 CONFIG_FILE = Path("config.json")
 
 DEFAULT_CONFIG = {
+    "instrumento": "",
+    "planilha_path": "",
     "precisao_correspondencia": 85,
     "velocidade_preenchimento": 50,
     "tentativas_por_item": 3,
@@ -268,6 +270,9 @@ class LicitaBotApp(ctk.CTk):
         self._build_body()
         self._build_footer()
         self._load_config()
+
+        # Show startup message
+        self.show_message("✓ LicitaBot iniciado com sucesso!", "success")
 
         self.bind_all(
             "<Button-1>",
@@ -694,6 +699,7 @@ class LicitaBotApp(ctk.CTk):
             highlightthickness=0,
             wrap="word",
             height=4,
+            state="disabled",  # Make it read-only
         )
         self.message_display.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
@@ -714,12 +720,18 @@ class LicitaBotApp(ctk.CTk):
         if self.message_display is None:
             return
 
+        # Enable text widget for editing
+        self.message_display.config(state="normal")
+        
         # Add timestamp
         import datetime
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         
         # Add message with tag
         self.message_display.insert("end", f"[{timestamp}] {message}\n", msg_type)
+        
+        # Disable text widget again
+        self.message_display.config(state="disabled")
         
         # Auto-scroll to bottom
         self.message_display.see("end")
@@ -809,7 +821,7 @@ class LicitaBotApp(ctk.CTk):
             self.var_total.set("Erro")
             self.var_filled.set("—")
             self.var_remaining.set("—")
-            print(f"Erro ao carregar planilha: {e}")
+            self.show_message(f"Erro ao carregar planilha: {e}", "error")
 
     def _remove_selection(self):
         sel = self.listbox.curselection()
@@ -874,7 +886,6 @@ class LicitaBotApp(ctk.CTk):
         self._call_main(config)
 
     def _call_main(self, config: dict):
-        """Call main.py with the provided configuration."""
         import sys
         import importlib.util
         import io
@@ -885,20 +896,20 @@ class LicitaBotApp(ctk.CTk):
             spec = importlib.util.spec_from_file_location("main", "main.py")
             main_module = importlib.util.module_from_spec(spec)
             
-            # Set configuration variables BEFORE loading the module
-            main_module.PRE_INSTRUMENTO = config['instrumento']
-            main_module.PLANILHA_PATH = config['planilha_path']
-            main_module.SIMILARITY_THRESHOLD = 1 - (config['precisao'] / 100)  # Convert percentage to threshold
-            main_module.MAX_TRIES = config['tentativas']
-            main_module.MAX_RESTARTS = config['reinicializacoes'] if config['usar_limite_reinicializacoes'] else None
-            
-            # Calculate the velocity multiplier (0.5 = slower, 2.0 = faster)
-            main_module.VELOCIDADE_MULTIPLICADOR = config['velocidade'] / 50.0
-            
             sys.modules['main'] = main_module
             spec.loader.exec_module(main_module)
             
-            # Capture stdout and stderr to redirect to GUI
+            main_module.PRE_INSTRUMENTO = config['instrumento']
+            main_module.PLANILHA_PATH = config['planilha_path']
+            main_module.SIMILARITY_THRESHOLD = 1 - (config['precisao'] / 100)
+            main_module.MAX_TRIES = config['tentativas']
+            main_module.MAX_RESTARTS = config['reinicializacoes'] if config['usar_limite_reinicializacoes'] else None
+            
+            slider_value = config['velocidade']
+            main_module.VELOCIDADE_MULTIPLICADOR = (100 - slider_value) / 100 * 0.9 + 0.1
+            
+            main_module.RELATORIO_PATH = main_module.get_relatorio_path()
+            
             stdout_capture = io.StringIO()
             stderr_capture = io.StringIO()
             
@@ -931,12 +942,16 @@ class LicitaBotApp(ctk.CTk):
         """Save current configuration to JSON file."""
         try:
             # Validate and get values with defaults
+            instrumento = self.entry_num.get() or ""
+            planilha_path = self.entry_dir.get() or ""
             precisao = self.entry_precisao.get() or "85"
             velocidade = self.entry_velocidade.get() or "50"
             tentativas = self.entry_attempts.get() or "3"
             reinicializacoes = self.entry_restarts.get() or "5" if self.var_use_restarts.get() else "0"
             
             config = {
+                "instrumento": instrumento,
+                "planilha_path": planilha_path,
                 "precisao_correspondencia": int(precisao),
                 "velocidade_preenchimento": int(velocidade),
                 "tentativas_por_item": int(tentativas),
@@ -991,6 +1006,13 @@ class LicitaBotApp(ctk.CTk):
             if self.entry_precisao is None:
                 return
             
+            # Load instrumento and planilha_path
+            self.entry_num.delete(0, "end")
+            self.entry_num.insert(0, config.get("instrumento", DEFAULT_CONFIG["instrumento"]))
+            
+            self.entry_dir.delete(0, "end")
+            self.entry_dir.insert(0, config.get("planilha_path", DEFAULT_CONFIG["planilha_path"]))
+            
             self.entry_precisao.delete(0, "end")
             self.entry_precisao.insert(0, str(config.get("precisao_correspondencia", DEFAULT_CONFIG["precisao_correspondencia"])))
             self.slider_precisao.set(float(self.entry_precisao.get()))
@@ -1015,7 +1037,7 @@ class LicitaBotApp(ctk.CTk):
             
             self.var_auto_login.set(config.get("tentar_login_automaticamente", DEFAULT_CONFIG["tentar_login_automaticamente"]))
         except Exception as e:
-            print(f"Erro ao aplicar configuração: {e}")
+            self.show_message(f"Erro ao aplicar configuração: {e}", "warning")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

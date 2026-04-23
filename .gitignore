@@ -2,3 +2,5 @@ gui-test.py
 gui-test
 /Sheets
 *.json
+/__pycache__
+*.xlsx
