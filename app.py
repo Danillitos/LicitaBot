@@ -6,6 +6,8 @@ from ui.constants import *
 from ui.widgets import *
 from logic.config_manager import *
 from logic.sheet_loader import *
+from ui.panels.instrumento import build_instrumento
+from ui.panels.info import build_info
 
 
 # ── Appearance ────────────────────────────────────────────────────────────────
@@ -16,6 +18,15 @@ ctk.set_default_color_theme("blue")
 #  Main App
 # ══════════════════════════════════════════════════════════════════════════════
 class LicitaBotApp(ctk.CTk):
+    _save_config = save_config
+    _load_config = load_config
+    _apply_config = apply_config
+    _load_saved_config = load_saved_config
+    _load_default_config = load_default_config 
+
+    _load_sheet_info = load_sheet_info
+    _update_sheet_info = update_sheet_info
+
     def __init__(self):
         super().__init__()
 
@@ -59,7 +70,6 @@ class LicitaBotApp(ctk.CTk):
             else None,
         )
 
-    # ── Header ────────────────────────────────────────────────────────────────
     def _build_header(self):
         header = ctk.CTkFrame(self, fg_color=HEADER_BG, height=52, corner_radius=0)
         header.pack(fill="x", side="top")
@@ -117,7 +127,7 @@ class LicitaBotApp(ctk.CTk):
     # ── Main content ──────────────────────────────────────────────────────────
     def _build_main(self, parent):
         main = ctk.CTkFrame(parent, fg_color=MAIN_BG)
-        main.pack(fill="both", expand=True, padx=0)
+        main.pack(fill="both", expand=True)
 
         main.columnconfigure(0, weight=3)
         main.columnconfigure(1, weight=2)
@@ -125,342 +135,10 @@ class LicitaBotApp(ctk.CTk):
         main.rowconfigure(1, weight=0)
         main.rowconfigure(2, weight=1)
 
-        # ── Row 0, Col 0: Instrumento/Planilha ───────────────────────────────
-        p_instr = make_panel(main)
-        p_instr.grid(row=0, column=0, padx=(14, 7), pady=(14, 7), sticky="nsew")
-
-        panel_title(p_instr, "▦", "Instrumento/Planilha")
-        divider(p_instr)
-        self.entry_num = self.labeled_entry(p_instr, "Numero do Instrumento", width=200)
-        self.entry_dir = self.labeled_entry(
-            p_instr, "Diretório da planilha", width=160, browse=True
-        )
-        ctk.CTkFrame(p_instr, height=10, fg_color="transparent").pack()
-
-        # ── Row 1, Col 0: Informações Gerais ─────────────────────────────────
-        p_info = make_panel(main)
-        p_info.grid(row=1, column=0, padx=(14, 7), pady=(0, 7), sticky="nsew")
-
-        panel_title(p_info, "ℹ", "Informações Gerais")
-        divider(p_info)
-
-        # Loading spinner label
-        self.loading_label = ctk.CTkLabel(
-            p_info,
-            text="",
-            font=("Montserrat UI", 12),
-            text_color=ACCENT_GREEN,
-        )
-        self.loading_label.pack(pady=4)
-        self.loading_spinner = LoadingSpinner(self.loading_label)
-
-        info_row(p_info, "Quantidade de linhas:",                self.var_total)
-        info_row(p_info, "Quantidade de linhas já preenchidas:", self.var_filled)
-        info_row(p_info, "Quantidade de linhas restantes:",      self.var_remaining)
-        info_row(p_info, "Quantidade de inicializações:",        self.var_inits)
-        info_row(p_info, "Erros encontrados:",                   self.var_errors)
-        ctk.CTkFrame(p_info, height=10, fg_color="transparent").pack()
-
-        # ── Row 0-1 span, Col 1: Listagem de planilhas ───────────────────────
-        p_list = make_panel(main)
-        p_list.grid(
-            row=0, column=1, rowspan=2, padx=(0, 14), pady=(14, 7), sticky="nsew"
-        )
-        p_list.rowconfigure(1, weight=1)
-        p_list.columnconfigure(0, weight=1)
-
-        panel_title(p_list, "≡", "Listagem de planilhas")
-        divider(p_list)
-
-        list_inner = ctk.CTkFrame(p_list, fg_color="transparent")
-        list_inner.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-        list_inner.columnconfigure(0, weight=1)
-        list_inner.rowconfigure(0, weight=1)
-
-        lb_frame = ctk.CTkFrame(
-            list_inner,
-            fg_color=LISTBOX_BG,
-            border_width=1,
-            border_color=FIELD_BORDER,
-            corner_radius=4,
-        )
-        lb_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        lb_frame.rowconfigure(0, weight=1)
-        lb_frame.columnconfigure(0, weight=1)
-
-        self.listbox = tk.Listbox(
-            lb_frame,
-            bg=LISTBOX_BG,
-            fg=TEXT_DARK,
-            selectbackground=SIDEBAR_BG,
-            selectforeground="#FFFFFF",
-            activestyle="none",
-            font=("Montserrat UI", 11),
-            relief="flat",
-            bd=0,
-            highlightthickness=0,
-        )
-        self.listbox.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-        self.listbox.insert("end", *[f.name for f in sheets])
-
-        scrollbar = ctk.CTkScrollbar(lb_frame, command=self.listbox.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.listbox.configure(yscrollcommand=scrollbar.set)
-
-        btn_col = ctk.CTkFrame(list_inner, fg_color="transparent", width=130)
-        btn_col.grid(row=0, column=1, sticky="n")
-        btn_col.pack_propagate(False)
-
-        ctk.CTkButton(
-            btn_col,
-            text="Selecionar Planilha",
-            fg_color=ACCENT_GREEN,
-            hover_color=ACCENT_GREEN_H,
-            text_color="#FFFFFF",
-            font=("Montserrat UI Semibold", 12),
-            height=36,
-            corner_radius=6,
-            command=self._select_sheet,
-        ).pack(fill="x", pady=(0, 8))
-
-        ctk.CTkButton(
-            btn_col,
-            text="Remover Seleção",
-            fg_color=ACCENT_RED,
-            hover_color=ACCENT_RED_H,
-            text_color="#FFFFFF",
-            font=("Montserrat UI Semibold", 12),
-            height=36,
-            corner_radius=6,
-            command=self._remove_selection,
-        ).pack(fill="x")
-
-        # ── Row 2, full width: Configurações ─────────────────────────────────
-        p_cfg = make_panel(main)
-        p_cfg.grid(
-            row=2, column=0, columnspan=2, padx=14, pady=(0, 14), sticky="nsew"
-        )
-
-        # Custom title with buttons
-        title_row = ctk.CTkFrame(p_cfg, fg_color="transparent")
-        title_row.pack(fill="x", padx=6, pady=(14, 8))
-        
-        ctk.CTkLabel(
-            title_row, text="⚙", font=("Montserrat UI Semibold", 14), text_color=ICON_COLOR
-        ).pack(side="left", padx=(0, 6))
-        ctk.CTkLabel(
-            title_row,
-            text="Configurações",
-            font=("Montserrat UI Semibold", 13),
-            text_color=TEXT_DARK,
-        ).pack(side="left")
-        
-        # Buttons on the right
-        buttons_frame = ctk.CTkFrame(title_row, fg_color="transparent")
-        buttons_frame.pack(side="right", padx=0)
-        
-        ctk.CTkButton(
-            buttons_frame,
-            text="Salvar Configuração",
-            fg_color=ACCENT_GREEN,
-            hover_color=ACCENT_GREEN_H,
-            text_color="#FFFFFF",
-            font=("Montserrat UI Semibold", 10),
-            height=28,
-            corner_radius=4,
-            command=self._save_config,
-        ).pack(side="left", padx=4)
-        
-        ctk.CTkButton(
-            buttons_frame,
-            text="Carregar Configuração Salva",
-            fg_color=SIDEBAR_BG,
-            hover_color=SIDEBAR_HOVER,
-            text_color="#FFFFFF",
-            font=("Montserrat UI Semibold", 10),
-            height=28,
-            corner_radius=4,
-            command=self._load_saved_config,
-        ).pack(side="left", padx=4)
-        
-        ctk.CTkButton(
-            buttons_frame,
-            text="Carregar Configuração Padrão",
-            fg_color=ACCENT_RED,
-            hover_color=ACCENT_RED_H,
-            text_color="#FFFFFF",
-            font=("Montserrat UI Semibold", 10),
-            height=28,
-            corner_radius=4,
-            command=self._load_default_config,
-        ).pack(side="left", padx=4)
-        
-        divider(p_cfg)
-
-        cfg_inner = ctk.CTkFrame(p_cfg, fg_color="transparent")
-        cfg_inner.pack(fill="both", expand=True, padx=4, pady=(0, 10))
-        cfg_inner.columnconfigure((0, 1, 2), weight=1)
-
-        # Col 0 – sliders
-        col0 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
-        col0.grid(row=0, column=0, sticky="nsew", padx=(8, 4))
-
-        self.slider_precisao, self.entry_precisao = slider_row(
-            col0,
-            "Precisão de correspondência:",
-            from_=0, to=100, default=85,
-            tooltip="Define o quão rigoroso o algoritmo de correspondência agirá sobre as descrições dos itens. Quanto maior o valor, menor a chance de um item ser preenchido incorretamente, porém maior a chance de falsos negativos, onde itens válidos são rejeitados por não atingirem o limiar exigido.",
-        )
-        self.slider_velocidade, self.entry_velocidade = slider_row(
-            col0,
-            "Velocidade de preenchimento:",
-            from_=0, to=100, default=50,
-            tooltip="Define a velocidade de preenchimento da automação no sistema TransfereGov. Quanto maior o valor, mais rápido o preenchimento, porém mais instável a automação, aumentando o risco de falhas e interrupções.",
-        )
-
-        # Vertical separator
-        ctk.CTkFrame(cfg_inner, width=1, fg_color=PANEL_BORDER).grid(
-            row=0, column=1, sticky="ns", padx=4, pady=6
-        )
-
-        # Col 1 – small entries
-        col1 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
-        col1.grid(row=0, column=1, sticky="nsew", padx=12)
-
-        def small_labeled_entry(parent, label, width=90, tooltip=""):
-            f = ctk.CTkFrame(parent, fg_color="transparent")
-            f.pack(fill="x", pady=6)
-
-            label_row = ctk.CTkFrame(f, fg_color="transparent")
-            label_row.pack(fill="x")
-
-            ctk.CTkLabel(
-                label_row,
-                text=label,
-                font=("Montserrat UI", 11),
-                text_color=TEXT_MID,
-                anchor="w",
-            ).pack(side="left")
-
-            if tooltip:
-                help_badge(label_row, tooltip).pack(side="left", padx=(6, 0))
-
-            e = ctk.CTkEntry(
-                f,
-                width=width,
-                height=28,
-                fg_color=FIELD_BG,
-                border_color=FIELD_BORDER,
-                border_width=1,
-                corner_radius=4,
-                font=("Montserrat UI", 11),
-                text_color=TEXT_DARK,
-            )
-            e.pack(anchor="w")
-            return e
-
-        self.entry_attempts = small_labeled_entry(
-            col1,
-            "Tentativas por item:",
-            tooltip="Define a quantidade de tentativas de preenchimento serão feitas por item caso o mesmo não seja encontrado no sistema.",
-        )
-        
-        # "Reinicializações máximas" with checkbox
-        f_restarts = ctk.CTkFrame(col1, fg_color="transparent")
-        f_restarts.pack(fill="x", pady=6)
-
-        label_restarts_row = ctk.CTkFrame(f_restarts, fg_color="transparent")
-        label_restarts_row.pack(fill="x", padx=0, pady=(0, 4))
-
-        ctk.CTkLabel(
-            label_restarts_row,
-            text="Reinicializações máximas:",
-            font=("Montserrat UI", 11),
-            text_color=TEXT_MID,
-            anchor="w",
-        ).pack(side="left")
-
-        help_badge(label_restarts_row, "Define a quantidade de vezes a automação irá reiniciar caso o sistema falhe ou venha a cair.").pack(side="left", padx=(6, 0))
-
-        entry_restarts_row = ctk.CTkFrame(f_restarts, fg_color="transparent")
-        entry_restarts_row.pack(fill="x")
-
-        self.entry_restarts = ctk.CTkEntry(
-            entry_restarts_row,
-            width=90,
-            height=28,
-            fg_color=FIELD_BG,
-            border_color=FIELD_BORDER,
-            border_width=1,
-            corner_radius=4,
-            font=("Montserrat UI", 11),
-            text_color=TEXT_DARK,
-        )
-        self.entry_restarts.pack(side="left")
-
-        def on_restarts_checkbox_change():
-            if self.var_use_restarts.get():
-                self.entry_restarts.configure(state="normal")
-            else:
-                self.entry_restarts.delete(0, "end")
-                self.entry_restarts.configure(state="disabled")
-
-        ctk.CTkCheckBox(
-            entry_restarts_row,
-            text="Usar limite",
-            variable=self.var_use_restarts,
-            command=on_restarts_checkbox_change,
-            font=("Montserrat UI", 10),
-            text_color=TEXT_MID,
-            fg_color=SIDEBAR_BG,
-            hover_color=SIDEBAR_HOVER,
-            checkmark_color="#FFFFFF",
-            border_color=FIELD_BORDER,
-        ).pack(side="left", padx=(12, 0))
-
-        # Vertical separator
-        ctk.CTkFrame(cfg_inner, width=1, fg_color=PANEL_BORDER).grid(
-            row=0, column=2, sticky="ns", padx=4, pady=6
-        )
-
-        # Col 2 – checkbox + badge
-        col2 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
-        col2.grid(row=0, column=2, sticky="nsew", padx=12)
-
-        cb_row = ctk.CTkFrame(col2, fg_color="transparent")
-        cb_row.pack(anchor="w", pady=10)
-
-        ctk.CTkCheckBox(
-            cb_row,
-            text="Tentar realizar login\nautomaticamente",
-            variable=self.var_auto_login,
-            font=("Montserrat UI", 11),
-            text_color=TEXT_MID,
-            fg_color=SIDEBAR_BG,
-            hover_color=SIDEBAR_HOVER,
-            checkmark_color="#FFFFFF",
-            border_color=FIELD_BORDER,
-        ).pack(side="left")
-
-        help_badge(cb_row, "Tenta realizar o login no Gov automaticamente. Atenção: Essa função pode não funcionar corretamente.").pack(side="left", padx=(10, 0))
-
-        # Bottom footer with "Iniciar Preenchimento" button
-        footer_frame = ctk.CTkFrame(p_cfg, fg_color="transparent")
-        footer_frame.pack(fill="x", padx=12, pady=(10, 12))
-        footer_frame.pack_propagate(False)
-        
-        ctk.CTkButton(
-            footer_frame,
-            text="Iniciar Preenchimento",
-            fg_color=ACCENT_GREEN,
-            hover_color=ACCENT_GREEN_H,
-            text_color="#FFFFFF",
-            font=("Montserrat UI Semibold", 12),
-            height=36,
-            width=200,
-            corner_radius=6,
-            command=self._start_filling,
-        ).pack(side="right", anchor="e")
+        build_instrumento(self, main)
+        build_info(self, main)
+        build_sheets(self, main)
+        build_configuracoes(self, main)
 
     # ── Footer with message display ────────────────────────────────────────────
     def _build_footer(self):
@@ -590,12 +268,6 @@ class LicitaBotApp(ctk.CTk):
         self.entry_dir.delete(0, "end")
         self.entry_dir.insert(0, str(path))
         self._load_sheet_info(str(path))
-        """Update UI when sheet loading fails."""
-        self.var_total.set("Erro")
-        self.var_filled.set("—")
-        self.var_remaining.set("—")
-        self.show_message(f"Erro ao carregar planilha: {error_msg}", "error")
-        self.loading_spinner.stop()
 
     def _remove_selection(self):
         sel = self.listbox.curselection()
