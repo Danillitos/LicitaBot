@@ -4,3 +4,4 @@ gui-test
 *.json
 /__pycache__
 *.xlsx
+*.pyc

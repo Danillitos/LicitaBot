@@ -3,238 +3,13 @@ from tkinter import filedialog
 import tkinter as tk
 from pathlib import Path
 import json
+import threading
+from ui.constants import *
+from ui.widgets import *
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
-
-# ── Palette ───────────────────────────────────────────────────────────────────
-SIDEBAR_BG      = "#2D4A5A"
-SIDEBAR_HOVER   = "#3A5F72"
-SIDEBAR_ACTIVE  = "#1E3545"
-HEADER_BG       = "#FFFFFF"
-MAIN_BG         = "#EAEEF0"
-PANEL_BG        = "#FFFFFF"
-PANEL_BORDER    = "#D0D8DC"
-ACCENT_GREEN    = "#4A7C59"
-ACCENT_GREEN_H  = "#3D6B4A"
-ACCENT_RED      = "#8B3A3A"
-ACCENT_RED_H    = "#7A2E2E"
-TEXT_DARK       = "#1A2B35"
-TEXT_MID        = "#4A6070"
-TEXT_LIGHT      = "#8A9EAA"
-FIELD_BG        = "#F5F7F8"
-FIELD_BORDER    = "#C8D4DA"
-SLIDER_BG       = "#B0C4CE"
-SLIDER_FG       = "#2D4A5A"
-LISTBOX_BG      = "#F5F7F8"
-ICON_COLOR      = "#2D4A5A"
-
-# ── Fixed resolution ──────────────────────────────────────────────────────────
-APP_W = 1440
-APP_H = 900
-
-# ── Folders ───────────────────────────────────────────────────────────────────
-FOLDER_LOGS   = Path("Logs").mkdir(exist_ok=True)
-FOLDER_SHEETS = Path("Sheets").mkdir(exist_ok=True)
-sheets = [f for f in Path("Sheets").iterdir() if f.suffix in (".xlsx", ".xls")]
-
-# ── Default Configuration ─────────────────────────────────────────────────────
-CONFIG_FILE = Path("config.json")
-
-DEFAULT_CONFIG = {
-    "instrumento": "",
-    "planilha_path": "",
-    "precisao_correspondencia": 85,
-    "velocidade_preenchimento": 50,
-    "tentativas_por_item": 3,
-    "reinicializacoes_maximas": 5,
-    "usar_limite_reinicializacoes": True,
-    "tentar_login_automaticamente": False,
-}
-
-
-# ── Tooltip ───────────────────────────────────────────────────────────────────
-# Defined first so help_badge can reference it below.
-class Tooltip:
-    def __init__(self, widget, text: str):
-        self.widget = widget
-        self.text   = text
-        self.tw     = None
-        widget.bind("<Enter>", self.show)
-        widget.bind("<Leave>", self.hide)
-
-    def show(self, event=None):
-        x = self.widget.winfo_rootx() + self.widget.winfo_width() + 6
-        y = self.widget.winfo_rooty() + (self.widget.winfo_height() // 2)
-
-        self.tw = tk.Toplevel(self.widget)
-        self.tw.wm_overrideredirect(True)
-        self.tw.wm_geometry(f"+{x}+{y}")
-        self.tw.attributes("-topmost", True)
-
-        frame = tk.Frame(self.tw, background=TEXT_DARK, bd=0)
-        frame.pack()
-
-        tk.Label(
-            frame,
-            text=self.text,
-            background=TEXT_DARK,
-            foreground="#FFFFFF",
-            font=("Montserrat UI", 10),
-            wraplength=220,
-            justify="left",
-            padx=10,
-            pady=8,
-        ).pack()
-
-    def hide(self, event=None):
-        if self.tw:
-            self.tw.destroy()
-            self.tw = None
-
-
-# ── Helper widgets ────────────────────────────────────────────────────────────
-def make_panel(parent, **kwargs):
-    """White rounded card panel."""
-    return ctk.CTkFrame(
-        parent,
-        fg_color=PANEL_BG,
-        corner_radius=8,
-        border_width=1,
-        border_color=PANEL_BORDER,
-        **kwargs,
-    )
-
-
-def panel_title(parent, icon: str, text: str):
-    """Icon + bold title row for a panel."""
-    row = ctk.CTkFrame(parent, fg_color="transparent")
-    row.pack(fill="x", padx=6, pady=(14, 8))
-    ctk.CTkLabel(
-        row, text=icon, font=("Montserrat UI Semibold", 14), text_color=ICON_COLOR
-    ).pack(side="left", padx=(0, 6))
-    ctk.CTkLabel(
-        row,
-        text=text,
-        font=("Montserrat UI Semibold", 13),
-        text_color=TEXT_DARK,
-    ).pack(side="left")
-
-
-def divider(parent):
-    ctk.CTkFrame(parent, height=1, fg_color=PANEL_BORDER).pack(
-        fill="x", padx=16, pady=(0, 10)
-    )
-
-
-def info_row(parent, label: str, var: tk.StringVar):
-    """Key-value info row."""
-    row = ctk.CTkFrame(parent, fg_color="transparent")
-    row.pack(fill="x", padx=16, pady=2)
-    ctk.CTkLabel(
-        row,
-        text=label,
-        font=("Montserrat UI", 11),
-        text_color=TEXT_MID,
-        anchor="w",
-    ).pack(side="left", fill="x", expand=True)
-    ctk.CTkLabel(
-        row,
-        textvariable=var,
-        font=("Montserrat UI Semibold", 11),
-        text_color=TEXT_DARK,
-        anchor="e",
-        width=60,
-    ).pack(side="right")
-
-
-def help_badge(parent, tooltip_text: str):
-    """Small ? label that shows a tooltip on hover."""
-    badge = ctk.CTkLabel(
-        parent,
-        text=" ? ",
-        font=("Montserrat UI Semibold", 10),
-        text_color="#FFFFFF",
-        fg_color=SLIDER_FG,
-        corner_radius=10,
-        width=18,
-        height=18,
-        cursor="question_arrow",
-    )
-    Tooltip(badge, tooltip_text)
-    return badge
-
-
-def slider_row(parent, label: str, from_=0, to=100, default=50, entry_width=50, tooltip: str = ""):
-    """Label + slider + value entry, with an optional ? tooltip badge."""
-    col = ctk.CTkFrame(parent, fg_color="transparent")
-    col.pack(fill="x", padx=12, pady=(6, 2))
-
-    # Label row (with optional badge)
-    label_row = ctk.CTkFrame(col, fg_color="transparent")
-    label_row.pack(fill="x")
-
-    ctk.CTkLabel(
-        label_row, text=label, font=("Montserrat UI", 11), text_color=TEXT_MID, anchor="w"
-    ).pack(side="left")
-
-    if tooltip:
-        help_badge(label_row, tooltip).pack(side="left", padx=(6, 0))
-
-    # Slider + entry row
-    row = ctk.CTkFrame(col, fg_color="transparent")
-    row.pack(fill="x")
-
-    val_var = tk.StringVar(value=str(default))
-
-    entry = ctk.CTkEntry(
-        row,
-        textvariable=val_var,
-        width=entry_width,
-        height=26,
-        fg_color=FIELD_BG,
-        border_color=FIELD_BORDER,
-        border_width=1,
-        corner_radius=4,
-        font=("Montserrat UI", 11),
-        text_color=TEXT_DARK,
-        justify="center",
-    )
-
-    def on_slide(v):
-        val_var.set(str(int(float(v))))
-
-    slider = ctk.CTkSlider(
-        row,
-        from_=from_,
-        to=to,
-        command=on_slide,
-        button_color=SLIDER_FG,
-        button_hover_color=SIDEBAR_HOVER,
-        progress_color=SLIDER_FG,
-        fg_color=SLIDER_BG,
-        height=14,
-    )
-    slider.set(default)
-    slider.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=4)
-    entry.pack(side="left")
-
-    def on_entry_change(*_):
-        try:
-            v = int(val_var.get())
-        except ValueError:
-            return
-
-        clamped = max(from_, min(to, v))
-        if v != clamped:
-            val_var.set(str(clamped))
-        slider.set(clamped)
-
-    val_var.trace_add("write", on_entry_change)
-
-    return slider, entry
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Main App
@@ -263,8 +38,10 @@ class LicitaBotApp(ctk.CTk):
         self.entry_attempts      = None
         self.entry_restarts      = None
         
-        # Message display
+        # Message display and loading spinner
         self.message_display     = None
+        self.loading_spinner     = None
+        self.loading_label       = None
 
         self._build_header()
         self._build_body()
@@ -365,6 +142,16 @@ class LicitaBotApp(ctk.CTk):
 
         panel_title(p_info, "ℹ", "Informações Gerais")
         divider(p_info)
+
+        # Loading spinner label
+        self.loading_label = ctk.CTkLabel(
+            p_info,
+            text="",
+            font=("Montserrat UI", 12),
+            text_color=ACCENT_GREEN,
+        )
+        self.loading_label.pack(pady=4)
+        self.loading_spinner = LoadingSpinner(self.loading_label)
 
         info_row(p_info, "Quantidade de linhas:",                self.var_total)
         info_row(p_info, "Quantidade de linhas já preenchidas:", self.var_filled)
@@ -799,29 +586,47 @@ class LicitaBotApp(ctk.CTk):
             return
         name = self.listbox.get(sel[0])
         path = Path("Sheets").resolve() / name
-        self._load_sheet_info(str(path))
         self.entry_dir.delete(0, "end")
         self.entry_dir.insert(0, str(path))
+        self._load_sheet_info(str(path))
 
     def _load_sheet_info(self, path: str):
-        try:
-            import pandas as pd
-            df        = pd.read_excel(path)
-            total     = len(df)
-            mask      = df.iloc[:, 4].notna() & (df.iloc[:, 4] != 0)
-            filled    = int(mask.sum())
-            remaining = total - filled
+        """Load sheet info in a background thread."""
+        def load_thread():
+            try:
+                import pandas as pd
+                df        = pd.read_excel(path)
+                total     = len(df)
+                mask      = df.iloc[:, 4].notna() & (df.iloc[:, 4] != 0)
+                filled    = int(mask.sum())
+                remaining = total - filled
 
-            self.var_total.set(str(total))
-            self.var_filled.set(str(filled))
-            self.var_remaining.set(str(remaining))
-            self.var_inits.set("0")
-            self.var_errors.set("0")
-        except Exception as e:
-            self.var_total.set("Erro")
-            self.var_filled.set("—")
-            self.var_remaining.set("—")
-            self.show_message(f"Erro ao carregar planilha: {e}", "error")
+                # Schedule UI update on main thread
+                self.after(0, lambda: self._update_sheet_info(total, filled, remaining))
+            except Exception as e:
+                self.after(0, lambda: self._update_sheet_info_error(str(e)))
+        
+        # Show loading spinner and start thread
+        self.loading_spinner.start()
+        thread = threading.Thread(target=load_thread, daemon=True)
+        thread.start()
+    
+    def _update_sheet_info(self, total, filled, remaining):
+        """Update UI with loaded sheet info."""
+        self.var_total.set(str(total))
+        self.var_filled.set(str(filled))
+        self.var_remaining.set(str(remaining))
+        self.var_inits.set("0")
+        self.var_errors.set("0")
+        self.loading_spinner.stop()
+    
+    def _update_sheet_info_error(self, error_msg):
+        """Update UI when sheet loading fails."""
+        self.var_total.set("Erro")
+        self.var_filled.set("—")
+        self.var_remaining.set("—")
+        self.show_message(f"Erro ao carregar planilha: {error_msg}", "error")
+        self.loading_spinner.stop()
 
     def _remove_selection(self):
         sel = self.listbox.curselection()
@@ -1012,6 +817,9 @@ class LicitaBotApp(ctk.CTk):
             
             self.entry_dir.delete(0, "end")
             self.entry_dir.insert(0, config.get("planilha_path", DEFAULT_CONFIG["planilha_path"]))
+
+            if self.entry_dir:
+                self._load_sheet_info(self.entry_dir.get())
             
             self.entry_precisao.delete(0, "end")
             self.entry_precisao.insert(0, str(config.get("precisao_correspondencia", DEFAULT_CONFIG["precisao_correspondencia"])))
