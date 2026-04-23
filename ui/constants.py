@@ -30,17 +30,3 @@ APP_H = 900
 Path("Logs").mkdir(exist_ok=True)
 Path("Sheets").mkdir(exist_ok=True)
 sheets = [f for f in Path("Sheets").iterdir() if f.suffix in (".xlsx", ".xls")]
-
-# ── Default Configuration ─────────────────────────────────────────────────────
-CONFIG_FILE = Path("config.json")
-
-DEFAULT_CONFIG = {
-    "instrumento": "",
-    "planilha_path": "",
-    "precisao_correspondencia": 85,
-    "velocidade_preenchimento": 50,
-    "tentativas_por_item": 3,
-    "reinicializacoes_maximas": 5,
-    "usar_limite_reinicializacoes": True,
-    "tentar_login_automaticamente": False,
-}
