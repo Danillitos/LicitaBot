@@ -20,7 +20,7 @@ VELOCIDADE_MULTIPLICADOR = 1.0  # Multiplicador de velocidade (1.0 = normal, 0.5
 
 # Calcular caminhos dinamicamente
 def get_relatorio_path():
-    return f'Logs/relatorio_execucao-{PRE_INSTRUMENTO}.xlsx'
+    return f'logs/relatorio_execucao-{PRE_INSTRUMENTO}.xlsx'
 
 RELATORIO_PATH = get_relatorio_path()
 
@@ -254,15 +254,17 @@ def run_filling():
         save_index_per_page = int(save.iloc[-1, 1])
         save_general_index = int(save.iloc[-1, 0])
         save_page = int(save.iloc[-1, 2])
+        inicializacoes = int(save["Inicializacoes"].iloc[-1]) + 1
         i = save_index_per_page
         i_global = save_general_index
         pagina = save_page
         print(f"Ponto salvo encontrado! Iniciando da iteração {i_global}, página {pagina+1}, item {i+1}")
-    except FileNotFoundError:
+    except (FileNotFoundError, KeyError):
         save = None
         i = 0
         i_global = 0
         pagina = 0
+        inicializacoes = 1
         print("Ponto salvo não encontrado! Iniciando do zero.")
     except Exception as e:
         print(f"Erro ao carregar save: {e}")
@@ -356,7 +358,8 @@ def run_filling():
                             "Preco_Novo": precosUnit[i_global],
                             "Similaridade": sim,
                             "Status": "OK",
-                            "Obs": ""
+                            "Obs": "",
+                            "inicializacoes": inicializacoes
                         })
                         
                         i += 1

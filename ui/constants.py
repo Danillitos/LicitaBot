@@ -27,6 +27,6 @@ APP_W = 1440
 APP_H = 900
 
 # ── Folders ───────────────────────────────────────────────────────────────────
-Path("Logs").mkdir(exist_ok=True)
-Path("Sheets").mkdir(exist_ok=True)
-sheets = [f for f in Path("Sheets").iterdir() if f.suffix in (".xlsx", ".xls")]
+Path("logs").mkdir(exist_ok=True)
+Path("sheets").mkdir(exist_ok=True)
+sheets = [f for f in Path("sheets").iterdir() if f.suffix in (".xlsx", ".xls")]

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from logic.sheet_loader import load_log_info, load_sheet_info
+
 CONFIG_FILE = Path("config.json")
 
 DEFAULT_CONFIG = {
@@ -89,8 +91,12 @@ def apply_config(app, config: dict):
         app.entry_dir.delete(0, "end")
         app.entry_dir.insert(0, config.get("planilha_path", DEFAULT_CONFIG["planilha_path"]))
 
+
         if app.entry_dir:
-            app._load_sheet_info(app.entry_dir.get())
+            load_sheet_info(app, app.entry_dir.get())
+
+        if app.entry_num:
+            load_log_info(app, app.entry_num.get())
         
         app.entry_precisao.delete(0, "end")
         app.entry_precisao.insert(0, str(config.get("precisao_correspondencia", DEFAULT_CONFIG["precisao_correspondencia"])))
