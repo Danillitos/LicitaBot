@@ -124,6 +124,14 @@ class LicitaBotApp(ctk.CTk):
                 height=42,
                 anchor="center",
             ).pack(fill="x", pady=(0, 1))
+        
+        ctk.CTkLabel(
+            sidebar,
+            text=f"v{APP_VERSION}",
+            font=("Montserrat UI", 10),
+            text_color=TEXT_LIGHT,
+            anchor="center",
+        ).pack(side="bottom", pady=8)
 
     # ── Main content ──────────────────────────────────────────────────────────
     def _build_main(self, parent):
@@ -265,7 +273,7 @@ class LicitaBotApp(ctk.CTk):
         if not sel:
             return
         name = self.listbox.get(sel[0])
-        path = Path("Sheets").resolve() / name
+        path = SHEETS_DIR / name
         self.entry_dir.delete(0, "end")
         self.entry_dir.insert(0, str(path))
         self._load_sheet_info(str(path))
@@ -277,11 +285,8 @@ class LicitaBotApp(ctk.CTk):
 
     def _open_sheets_folder(self):
         import os
-        from pathlib import Path
-        sheets_folder = Path("sheets").resolve()
-        if not sheets_folder.exists():
-            sheets_folder.mkdir()
-        os.startfile(sheets_folder)
+        SHEETS_DIR.mkdir(exist_ok=True)
+        os.startfile(SHEETS_DIR)
 
     def _update_sheets_list(self):
         sheets = load_sheets()      

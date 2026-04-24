@@ -1,5 +1,6 @@
 import tkinter as tk
 import customtkinter as ctk
+from logic.sheet_loader import load_sheets
 from ui.constants import *
 from ui.widgets import make_panel, panel_title, divider
 
@@ -41,7 +42,9 @@ def build_sheets(app, parent):
         highlightthickness=0,
     )
     app.listbox.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-    app.listbox.insert("end", *[f.name for f in sheets])
+    initial_sheets = load_sheets()
+    if initial_sheets:
+        app.listbox.insert("end", *[f.name for f in initial_sheets])
 
     scrollbar = ctk.CTkScrollbar(lb_frame, command=app.listbox.yview)
     scrollbar.grid(row=0, column=1, sticky="ns")

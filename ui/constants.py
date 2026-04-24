@@ -1,4 +1,7 @@
 from pathlib import Path
+import sys
+
+APP_VERSION = "1.0.0"
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 SIDEBAR_BG      = "#2D4A5A"
@@ -27,6 +30,15 @@ APP_W = 1440
 APP_H = 900
 
 # ── Folders ───────────────────────────────────────────────────────────────────
-Path("logs").mkdir(exist_ok=True)
-Path("sheets").mkdir(exist_ok=True)
-sheets = [f for f in Path("sheets").iterdir() if f.suffix in (".xlsx", ".xls")]
+def resource_path(relative_path: str) -> Path:
+    if hasattr(sys, '_MEIPASS'):
+        # Running as compiled exe
+        base = Path(sys._MEIPASS)
+    else:
+        # Running as normal Python
+        base = Path(__file__).parent.parent
+    return base / relative_path
+
+SHEETS_DIR = resource_path("Sheets")
+SHEETS_DIR.mkdir(exist_ok=True)
+sheets = [f for f in SHEETS_DIR.iterdir() if f.suffix in (".xlsx", ".xls")]
