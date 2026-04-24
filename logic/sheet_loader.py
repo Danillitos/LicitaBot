@@ -51,3 +51,9 @@ def update_error(app, msg):
     app.var_total.set("Erro")
     app.show_message(f"Erro ao carregar planilha: {msg}", "error")
     app.loading_spinner.stop()
+
+def load_sheets():
+    sheets_dir = Path("Sheets")
+    if not sheets_dir.exists():
+        return []
+    return [f for f in sheets_dir.iterdir() if f.suffix in (".xlsx", ".xls")]

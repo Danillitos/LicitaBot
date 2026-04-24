@@ -106,6 +106,7 @@ def build_configuracoes(app, parent):
     )
 
     # ── Col 2 – checkbox ──────────────────────────────────────────────────────
+    """ Ainda para ser desenvolvido
     col2 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
     col2.grid(row=0, column=2, sticky="nsew", padx=12)
 
@@ -125,6 +126,8 @@ def build_configuracoes(app, parent):
     ).pack(side="left")
 
     help_badge(cb_row, "Tenta realizar o login no Gov automaticamente. Atenção: Essa função pode não funcionar corretamente.").pack(side="left", padx=(10, 0))
+    
+    """
 
     # ── Start button ──────────────────────────────────────────────────────────
     footer_frame = ctk.CTkFrame(p, fg_color="transparent")

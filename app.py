@@ -275,6 +275,22 @@ class LicitaBotApp(ctk.CTk):
         if sel:
             self.listbox.delete(sel[0])
 
+    def _open_sheets_folder(self):
+        import os
+        from pathlib import Path
+        sheets_folder = Path("sheets").resolve()
+        if not sheets_folder.exists():
+            sheets_folder.mkdir()
+        os.startfile(sheets_folder)
+
+    def _update_sheets_list(self):
+        sheets = load_sheets()      
+        self.listbox.delete(0, "end")   
+        if sheets:
+            self.listbox.insert("end", *[f.name for f in sheets])
+        else:
+            self.listbox.insert("end", "Nenhuma planilha encontrada")
+
     def _start_filling(self):
         """Validate inputs and start the filling process."""
         # Validation

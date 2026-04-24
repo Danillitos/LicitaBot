@@ -5,9 +5,10 @@ from selenium.webdriver.support import expected_conditions as EC
 import pyautogui
 import pandas as pd
 import time
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, NoSuchElementException, ElementClickInterceptedException
+from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, ElementClickInterceptedException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.action_chains import ActionChains
+from pathlib import Path
 
 # ── Configuration Variables (can be set by GUI) ──────────────────────────────
 PRE_INSTRUMENTO = 'XXXXX'  # INSERIR NUMERO DO INSTRUMENTO A SER EDITADO
@@ -17,6 +18,8 @@ SIMILARITY_THRESHOLD = 0.65  # Limiar de similaridade para considerar como match
 MAX_TRIES = 5  # Máximo de tentativas para matching antes de pular
 MAX_RESTARTS = None  # Máximo de reinicializações (None = ilimitado)
 VELOCIDADE_MULTIPLICADOR = 1.0  # Multiplicador de velocidade (1.0 = normal, 0.5 = mais lento, 2.0 = mais rápido)
+
+Path("logs").mkdir(exist_ok=True)
 
 # Calcular caminhos dinamicamente
 def get_relatorio_path():

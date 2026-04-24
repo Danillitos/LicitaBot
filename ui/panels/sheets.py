@@ -1,6 +1,5 @@
 import tkinter as tk
 import customtkinter as ctk
-from pathlib import Path
 from ui.constants import *
 from ui.widgets import make_panel, panel_title, divider
 
@@ -74,4 +73,29 @@ def build_sheets(app, parent):
         height=36,
         corner_radius=6,
         command=app._remove_selection,
+    ).pack(fill="x", pady=(0, 8))
+
+    ctk.CTkButton(
+        btn_col,
+        text="Pasta de Planilhas",
+        fg_color=SIDEBAR_BG,
+        hover_color=SIDEBAR_HOVER,
+        text_color="#FFFFFF",
+        font=("Montserrat UI Semibold", 12),
+        height=36,
+        corner_radius=6,
+        command=app._open_sheets_folder,
+    ).pack(fill="x", pady=(0, 8))
+
+    ctk.CTkButton(
+        btn_col,
+        text="Atualizar lista",
+        fg_color=SIDEBAR_BG,
+        hover_color=SIDEBAR_HOVER,
+        text_color="#FFFFFF",
+        font=("Montserrat UI Semibold", 12),
+        height=36,
+        corner_radius=6,
+        command=app._update_sheets_list,
     ).pack(fill="x")
+    
