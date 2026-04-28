@@ -32,13 +32,17 @@ APP_H = 900
 # ── Folders ───────────────────────────────────────────────────────────────────
 def resource_path(relative_path: str) -> Path:
     if hasattr(sys, '_MEIPASS'):
-        # Running as compiled exe
         base = Path(sys._MEIPASS)
     else:
-        # Running as normal Python
         base = Path(__file__).parent.parent
     return base / relative_path
 
-SHEETS_DIR = resource_path("Sheets")
+def get_base_dir() -> Path:
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent.parent
+
+BASE_DIR = get_base_dir()
+SHEETS_DIR = BASE_DIR / "Sheets"
 SHEETS_DIR.mkdir(exist_ok=True)
 sheets = [f for f in SHEETS_DIR.iterdir() if f.suffix in (".xlsx", ".xls")]

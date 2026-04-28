@@ -9,6 +9,7 @@ from selenium.common.exceptions import StaleElementReferenceException, TimeoutEx
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.action_chains import ActionChains
 from pathlib import Path
+import threading
 
 # ── Configuration Variables (can be set by GUI) ──────────────────────────────
 PRE_INSTRUMENTO = 'XXXXX'  # INSERIR NUMERO DO INSTRUMENTO A SER EDITADO
@@ -18,6 +19,8 @@ SIMILARITY_THRESHOLD = 0.65  # Limiar de similaridade para considerar como match
 MAX_TRIES = 5  # Máximo de tentativas para matching antes de pular
 MAX_RESTARTS = None  # Máximo de reinicializações (None = ilimitado)
 VELOCIDADE_MULTIPLICADOR = 1.0  # Multiplicador de velocidade (1.0 = normal, 0.5 = mais lento, 2.0 = mais rápido)
+
+STOP_REQUESTED = threading.Event()
 
 Path("logs").mkdir(exist_ok=True)
 
@@ -29,8 +32,17 @@ RELATORIO_PATH = get_relatorio_path()
 
 # ── Sleep helper with velocity control ────────────────────────────────────────
 def velocity_sleep(base_seconds):
+    global STOP_REQUESTED
     actual_sleep = base_seconds * VELOCIDADE_MULTIPLICADOR
-    time.sleep(actual_sleep)
+    interval = 0.2
+
+    elapsed = 0
+    while elapsed < actual_sleep:
+        if STOP_REQUESTED.is_set():
+            print("🚫 Parada solicitada durante sleep. Encerrando processo...")
+            break
+        time.sleep(min(interval, actual_sleep - elapsed))
+        elapsed += interval
 
 # Função para calcular distância de Levenshtein
 def levenshtein_distance(s1, s2):
@@ -241,11 +253,16 @@ def save_or_concat(log_registros, save):
         df_log.to_excel(RELATORIO_PATH, index=False)
     print(f"📊 Relatório salvo em {RELATORIO_PATH}")
 
+def check_stop():
+    return STOP_REQUESTED.is_set()
+
 # Função principal
 def run_filling():
-    """Main execution function that can be called from GUI or standalone."""
     global RELATORIO_PATH
     RELATORIO_PATH = get_relatorio_path()  # Update report path with current instrument number
+
+    global STOP_REQUESTED
+    STOP_REQUESTED = threading.Event()
     
     # Loop principal com reinício automático
     descricoes, precosUnit = load_data()
@@ -277,6 +294,9 @@ def run_filling():
         pagina = 0
 
     while i_global < len(descricoes):
+        if check_stop():
+            break
+
         driver = None
         try:
             driver = init_driver()
@@ -284,6 +304,9 @@ def run_filling():
                 raise Exception("Falha na navegação/login inicial")
             
             while i_global < len(descricoes):
+                if check_stop():
+                    break
+
                 handle_session_popup(driver)
                 
                 if not go_to_page(driver, pagina):
@@ -299,7 +322,13 @@ def run_filling():
                 
                 tentativas = 0
                 while True:
+                    if check_stop():
+                        break
+
                     for attempt in range(5):  # Tentativas para clicar no editar
+                        if check_stop():
+                            break
+
                         try:
                             icones_editar = get_fresh_edit_icons(driver)
                             icone = icones_editar[i]
@@ -423,6 +452,12 @@ def run_filling():
     # Salvar relatório final
     if log_registros:
         save_or_concat(log_registros, save)
+
+    if STOP_REQUESTED:
+        print("Processo interrompido pelo usuário.")
+        if driver:
+            driver.quit()
+        return
 
     if driver:
         driver.quit()

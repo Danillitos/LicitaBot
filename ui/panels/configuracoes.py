@@ -147,6 +147,19 @@ def build_configuracoes(app, parent):
         command=app._start_filling,
     ).pack(side="right", anchor="e")
 
+    ctk.CTkButton(
+        footer_frame,
+        text="Encerrar Preenchimento",
+        fg_color=ACCENT_RED,
+        hover_color=ACCENT_RED_H,
+        text_color="#FFFFFF",
+        font=("Montserrat UI Semibold", 12),
+        height=36,
+        width=200,
+        corner_radius=6,
+        command=app._stop_filling,
+    ).pack(side="right", anchor="e", padx=(0, 12))
+
 
 # ── Private helpers ───────────────────────────────────────────────────────────
 def _small_entry(parent, label, width=90, tooltip=""):

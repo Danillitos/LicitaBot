@@ -6,3 +6,5 @@ gui-test
 *.xlsx
 *.pyc
 *.spec
+/build
+/dist

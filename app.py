@@ -9,6 +9,7 @@ from ui.panels.instrumento import build_instrumento
 from ui.panels.info import build_info
 from ui.panels.sheets import build_sheets
 from ui.panels.configuracoes import build_configuracoes
+import threading
 
 
 # ── Appearance ────────────────────────────────────────────────────────────────
@@ -79,7 +80,7 @@ class LicitaBotApp(ctk.CTk):
         try:
             from PIL import Image
             logo_img = ctk.CTkImage(
-                light_image=Image.open("assets/LOGO.png"),
+                light_image=Image.open(resource_path("assets/LOGO.png")),
                 size=(140, 36),
             )
             ctk.CTkLabel(header, image=logo_img, text="").pack(
@@ -297,7 +298,6 @@ class LicitaBotApp(ctk.CTk):
             self.listbox.insert("end", "Nenhuma planilha encontrada")
 
     def _start_filling(self):
-        """Validate inputs and start the filling process."""
         # Validation
         errors = []
         
@@ -349,23 +349,24 @@ class LicitaBotApp(ctk.CTk):
             msg_lines.append(f"  → Reinicializações: Ilimitado")
         
         self.show_message("\n".join(msg_lines), "success")
-        
-        # Call main.py with the configuration
-        self._call_main(config)
+
+        thread = threading.Thread(target=self._call_main, args=(config,))
+        thread.start()
+
+        self.after(0, lambda: self.show_message("A automação está em execução", "info"))
+
+    def _stop_filling(self):
+        import main
+        main.STOP_REQUESTED = True
+        self.show_message("⏹ Parando preenchimento...", "warning")
 
     def _call_main(self, config: dict):
-        import sys
-        import importlib.util
         import io
         from contextlib import redirect_stdout, redirect_stderr
         
         try:
             # Load main.py as a module
-            spec = importlib.util.spec_from_file_location("main", "main.py")
-            main_module = importlib.util.module_from_spec(spec)
-            
-            sys.modules['main'] = main_module
-            spec.loader.exec_module(main_module)
+            import main as main_module
             
             main_module.PRE_INSTRUMENTO = config['instrumento']
             main_module.PLANILHA_PATH = config['planilha_path']
