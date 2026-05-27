@@ -15,7 +15,7 @@ import threading
 PRE_INSTRUMENTO = 'XXXXX'  # INSERIR NUMERO DO INSTRUMENTO A SER EDITADO
 PLANILHA_PATH = 'XXXXX'  # CAMPO DE INSERÇÃO DA PLANILHA ORÇAMENTARIA FORNECIDA PELA CONSTRUTORA
 DEFAULT_TIMEOUT = 60  # Aumentado para lidar com SPA lenta
-SIMILARITY_THRESHOLD = 0.65  # Limiar de similaridade para considerar como match
+SIMILARITY_THRESHOLD = 0.85  # Limiar mínimo de similaridade para considerar como match
 MAX_TRIES = 5  # Máximo de tentativas para matching antes de pular
 MAX_RESTARTS = None  # Máximo de reinicializações (None = ilimitado)
 VELOCIDADE_MULTIPLICADOR = 1.0  # Multiplicador de velocidade (1.0 = normal, 0.5 = mais lento, 2.0 = mais rápido)
@@ -72,7 +72,7 @@ def similarity(s1, s2):
 # Função para inicializar o driver
 def init_driver():
     chrome_options = Options()
-    driver = uc.Chrome(options=chrome_options, version_main=146)
+    driver = uc.Chrome(options=chrome_options, version_main=148)
     driver.execute_cdp_cmd('Storage.clearDataForOrigin', {"origin": '*', "storageTypes": 'all'})
     driver.get('https://portal.transferegov.sistema.gov.br/portal/home')
     return driver

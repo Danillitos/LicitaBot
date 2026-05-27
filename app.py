@@ -361,44 +361,22 @@ class LicitaBotApp(ctk.CTk):
         self.show_message("⏹ Parando preenchimento...", "warning")
 
     def _call_main(self, config: dict):
-        import io
-        from contextlib import redirect_stdout, redirect_stderr
-        
         try:
             # Load main.py as a module
             import main as main_module
-            
+
             main_module.PRE_INSTRUMENTO = config['instrumento']
             main_module.PLANILHA_PATH = config['planilha_path']
-            main_module.SIMILARITY_THRESHOLD = 1 - (config['precisao'] / 100)
+            main_module.SIMILARITY_THRESHOLD = config['precisao'] / 100
             main_module.MAX_TRIES = config['tentativas']
             main_module.MAX_RESTARTS = config['reinicializacoes'] if config['usar_limite_reinicializacoes'] else None
-            
+
             slider_value = config['velocidade']
             main_module.VELOCIDADE_MULTIPLICADOR = (100 - slider_value) / 100 * 0.9 + 0.1
-            
             main_module.RELATORIO_PATH = main_module.get_relatorio_path()
-            
-            stdout_capture = io.StringIO()
-            stderr_capture = io.StringIO()
-            
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                main_module.run_filling()
-            
-            # Display captured output in GUI
-            stdout_output = stdout_capture.getvalue()
-            stderr_output = stderr_capture.getvalue()
-            
-            if stdout_output:
-                for line in stdout_output.strip().split('\n'):
-                    if line.strip():
-                        self.show_message(line, "info")
-            
-            if stderr_output:
-                for line in stderr_output.strip().split('\n'):
-                    if line.strip():
-                        self.show_message(line, "error")
-            
+
+            main_module.run_filling()
+
             self.show_message("✓ Preenchimento concluído!", "success")
         except Exception as e:
             error_msg = f"✗ Erro ao executar preenchimento: {e}"
