@@ -29,7 +29,12 @@ def load_log_info(app, instrumento: str):
             
             filled    = len(df[df["Status"] == "OK"])
             errors    = len(df[df["Status"].isin(["ERRO", "SKIPPED"])])
-            inits     = int(df["Inicializacoes"].iloc[-1]) if "Inicializacoes" in df.columns else 0
+            if "Inicializacoes" in df.columns:
+                inits = int(df["Inicializacoes"].iloc[-1])
+            elif "inicializacoes" in df.columns:
+                inits = int(df["inicializacoes"].iloc[-1])
+            else:
+                inits = 0
             
             app.after(0, lambda: _update_log_info(app, filled, inits, errors))
         except Exception as e:

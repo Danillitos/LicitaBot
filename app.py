@@ -357,7 +357,7 @@ class LicitaBotApp(ctk.CTk):
 
     def _stop_filling(self):
         import main
-        main.STOP_REQUESTED = True
+        main.STOP_REQUESTED.set()
         self.show_message("⏹ Parando preenchimento...", "warning")
 
     def _call_main(self, config: dict):

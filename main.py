@@ -5,11 +5,14 @@ from selenium.webdriver.support import expected_conditions as EC
 import pyautogui
 import pandas as pd
 import time
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, ElementClickInterceptedException
+from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, ElementClickInterceptedException, SessionNotCreatedException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.action_chains import ActionChains
 from pathlib import Path
 import threading
+import os
+import re
+import subprocess
 
 # ── Configuration Variables (can be set by GUI) ──────────────────────────────
 PRE_INSTRUMENTO = 'XXXXX'  # INSERIR NUMERO DO INSTRUMENTO A SER EDITADO
@@ -69,10 +72,68 @@ def similarity(s1, s2):
     max_len = max(len(s1), len(s2))
     return 1 - (distance / max_len) if max_len != 0 else 1.0
 
+# Função para detectar a versão do Chrome instalado no Windows
+def get_chrome_major_version():
+    """Retorna a versão principal (ex: 149) do Chrome instalado, ou None se não detectada.
+    Assim o chromedriver baixado sempre corresponde ao navegador, mesmo após atualizações."""
+    import winreg
+
+    # 1) Chave de registro gravada pelo próprio Chrome (atualizada a cada execução/update)
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, r"Software\Google\Chrome\BLBeacon") as key:
+                version, _ = winreg.QueryValueEx(key, "version")
+                return int(version.split(".")[0])
+        except (OSError, ValueError, IndexError):
+            continue
+
+    # 2) Fallback: versão do arquivo chrome.exe nos caminhos de instalação conhecidos
+    candidates = []
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
+        ) as key:
+            candidates.append(winreg.QueryValueEx(key, None)[0])
+    except OSError:
+        pass
+    candidates += [
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            try:
+                output = subprocess.check_output(
+                    ["powershell", "-NoProfile", "-Command",
+                     f"(Get-Item '{path}').VersionInfo.ProductVersion"],
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                return int(output.strip().split(".")[0])
+            except (subprocess.SubprocessError, ValueError, IndexError, OSError):
+                continue
+
+    return None
+
 # Função para inicializar o driver
 def init_driver():
-    chrome_options = Options()
-    driver = uc.Chrome(options=chrome_options, version_main=148)
+    version_main = get_chrome_major_version()
+    if version_main:
+        print(f"🌐 Chrome detectado: versão {version_main}")
+    else:
+        print("⚠️ Versão do Chrome não detectada. Usando a versão mais recente do driver.")
+    try:
+        driver = uc.Chrome(options=Options(), version_main=version_main)
+    except SessionNotCreatedException as e:
+        # Última defesa: a mensagem de erro do driver informa a versão real do navegador
+        match = re.search(r"Current browser version is (\d+)", str(e))
+        if not match:
+            raise
+        browser_major = int(match.group(1))
+        print(f"🔁 Driver incompatível com o navegador. Baixando driver para o Chrome {browser_major}...")
+        driver = uc.Chrome(options=Options(), version_main=browser_major)
     driver.execute_cdp_cmd('Storage.clearDataForOrigin', {"origin": '*', "storageTypes": 'all'})
     driver.get('https://portal.transferegov.sistema.gov.br/portal/home')
     return driver
@@ -274,12 +335,17 @@ def run_filling():
         save_index_per_page = int(save.iloc[-1, 1])
         save_general_index = int(save.iloc[-1, 0])
         save_page = int(save.iloc[-1, 2])
-        inicializacoes = int(save["Inicializacoes"].iloc[-1]) + 1
+        if "Inicializacoes" in save.columns:
+            inicializacoes = int(save["Inicializacoes"].iloc[-1]) + 1
+        elif "inicializacoes" in save.columns:
+            inicializacoes = int(save["inicializacoes"].iloc[-1]) + 1
+        else:
+            inicializacoes = 1
         i = save_index_per_page
         i_global = save_general_index
         pagina = save_page
         print(f"Ponto salvo encontrado! Iniciando da iteração {i_global}, página {pagina+1}, item {i+1}")
-    except (FileNotFoundError, KeyError):
+    except FileNotFoundError:
         save = None
         i = 0
         i_global = 0
@@ -453,7 +519,7 @@ def run_filling():
     if log_registros:
         save_or_concat(log_registros, save)
 
-    if STOP_REQUESTED:
+    if STOP_REQUESTED.is_set():
         print("Processo interrompido pelo usuário.")
         if driver:
             driver.quit()
