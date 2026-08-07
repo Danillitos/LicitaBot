@@ -10,3 +10,4 @@ gui-test
 /build
 /dist
 teste_navegacao.py
+/logs
