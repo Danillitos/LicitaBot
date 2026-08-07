@@ -41,7 +41,6 @@ class Tooltip:
             self.tw = None
 
 
-# ── Helper widgets ────────────────────────────────────────────────────────────
 def make_panel(parent, **kwargs):
     """White rounded card panel."""
     return ctk.CTkFrame(
@@ -118,7 +117,6 @@ def slider_row(parent, label: str, from_=0, to=100, default=50, entry_width=50, 
     col = ctk.CTkFrame(parent, fg_color="transparent")
     col.pack(fill="x", padx=12, pady=(6, 2))
 
-    # Label row (with optional badge)
     label_row = ctk.CTkFrame(col, fg_color="transparent")
     label_row.pack(fill="x")
 
@@ -129,7 +127,6 @@ def slider_row(parent, label: str, from_=0, to=100, default=50, entry_width=50, 
     if tooltip:
         help_badge(label_row, tooltip).pack(side="left", padx=(6, 0))
 
-    # Slider + entry row
     row = ctk.CTkFrame(col, fg_color="transparent")
     row.pack(fill="x")
 
@@ -183,7 +180,6 @@ def slider_row(parent, label: str, from_=0, to=100, default=50, entry_width=50, 
     return slider, entry
 
 
-# ── Loading Spinner ───────────────────────────────────────────────────────────
 class LoadingSpinner:
     """Rotating loading spinner for background operations."""
     SPINNER_CHARS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -208,4 +204,3 @@ class LoadingSpinner:
         if self.after_id:
             self.label.after_cancel(self.after_id)
         self.label.configure(text="")
-

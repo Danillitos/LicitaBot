@@ -5,7 +5,13 @@ from selenium.webdriver.support import expected_conditions as EC
 import pyautogui
 import pandas as pd
 import time
-from selenium.common.exceptions import StaleElementReferenceException, TimeoutException, ElementClickInterceptedException, SessionNotCreatedException
+from selenium.common.exceptions import (
+    StaleElementReferenceException,
+    TimeoutException,
+    ElementClickInterceptedException,
+    SessionNotCreatedException,
+    WebDriverException,
+)
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.action_chains import ActionChains
 from pathlib import Path
@@ -13,27 +19,66 @@ import threading
 import os
 import re
 import subprocess
+import unicodedata
 
-# ── Configuration Variables (can be set by GUI) ──────────────────────────────
-PRE_INSTRUMENTO = 'XXXXX'  # INSERIR NUMERO DO INSTRUMENTO A SER EDITADO
-PLANILHA_PATH = 'XXXXX'  # CAMPO DE INSERÇÃO DA PLANILHA ORÇAMENTARIA FORNECIDA PELA CONSTRUTORA
-DEFAULT_TIMEOUT = 60  # Aumentado para lidar com SPA lenta
-SIMILARITY_THRESHOLD = 0.85  # Limiar mínimo de similaridade para considerar como match
-MAX_TRIES = 5  # Máximo de tentativas para matching antes de pular
-MAX_RESTARTS = None  # Máximo de reinicializações (None = ilimitado)
-VELOCIDADE_MULTIPLICADOR = 1.0  # Multiplicador de velocidade (1.0 = normal, 0.5 = mais lento, 2.0 = mais rápido)
+PRE_INSTRUMENTO = 'XXXXX'
+PLANILHA_PATH = 'XXXXX'
+DEFAULT_TIMEOUT = 60
+SIMILARITY_THRESHOLD = 0.85
+MAX_TRIES = 5
+MAX_RESTARTS = None
+VELOCIDADE_MULTIPLICADOR = 1.0
+
+MARGEM_RENOVACAO_SEG = 300
+
+MAX_RECUPERACOES_LEVES = 2
+
+BTN_SALVAR = 'button.btn.btn-primary:not(.modal-dialog button)'
+BTN_MODAL_SIM = '.modal-dialog button.btn.btn-primary'
+
+ICONE_EDITAR = 'i.fa.fa-pencil'
+
+LOGO_PRINCIPAL_ID = 'lnkPrincipal'
+URL_PRINCIPAL_LEGADO = ('https://discricionarias.transferegov.sistema.gov.br/voluntarias/'
+                        'ForwardAction.do?modulo=Principal&path=/Principal.do')
+MENU_PRINCIPAL_ID = 'menuPrincipal'
+CRONOMETRO_ID = 'tempoRestante'
+
+MODAL_AUSENTE = 'ausente'
+MODAL_SESSAO = 'sessao'
+MODAL_DESCONHECIDO = 'desconhecido'
 
 STOP_REQUESTED = threading.Event()
 
 Path("logs").mkdir(exist_ok=True)
 
-# Calcular caminhos dinamicamente
+
+class RecuperacaoFalhou(Exception):
+    """A recuperação leve (sem captcha) não conseguiu restaurar a navegação."""
+
+
 def get_relatorio_path():
     return f'logs/relatorio_execucao-{PRE_INSTRUMENTO}.xlsx'
 
 RELATORIO_PATH = get_relatorio_path()
 
-# ── Sleep helper with velocity control ────────────────────────────────────────
+
+def log(mensagem, nivel="info"):
+    """Escreve no console e em logs/execucao-<instrumento>.log.
+
+    O executável é buildado com console=False (app.spec), então print() sozinho
+    não chega a lugar nenhum — sem o arquivo, o usuário fica cego quanto ao que
+    aconteceu na máquina dele."""
+    marcador = {"info": "ℹ️", "ok": "✅", "aviso": "⚠️", "erro": "🚫"}.get(nivel, "")
+    linha = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {marcador} {mensagem}"
+    print(linha)
+    try:
+        with open(f'logs/execucao-{PRE_INSTRUMENTO}.log', 'a', encoding='utf-8') as arquivo:
+            arquivo.write(linha + "\n")
+    except OSError:
+        pass
+
+
 def velocity_sleep(base_seconds):
     global STOP_REQUESTED
     actual_sleep = base_seconds * VELOCIDADE_MULTIPLICADOR
@@ -47,7 +92,59 @@ def velocity_sleep(base_seconds):
         time.sleep(min(interval, actual_sleep - elapsed))
         elapsed += interval
 
-# Função para calcular distância de Levenshtein
+
+def aguardar(condicao, timeout=15, intervalo=0.5):
+    """Espera `condicao()` virar verdadeira, respeitando a parada do usuário.
+
+    Não passa por VELOCIDADE_MULTIPLICADOR de propósito: renovação de sessão não é
+    etapa de preenchimento, e o usuário não deve conseguir deixá-la lenta a ponto de
+    perder a janela do token."""
+    limite = time.monotonic() + timeout
+    while time.monotonic() < limite:
+        if STOP_REQUESTED.is_set():
+            return False
+        try:
+            if condicao():
+                return True
+        except WebDriverException:
+            pass
+        time.sleep(intervalo)
+    return False
+
+
+def _normalizar(texto):
+    """Minúsculas, sem acento e com espaços colapsados — para comparar texto de tela."""
+    decomposto = unicodedata.normalize('NFKD', texto or '')
+    sem_acento = ''.join(c for c in decomposto if not unicodedata.combining(c))
+    return ' '.join(sem_acento.lower().split())
+
+
+def _int_seguro(valor, padrao=0):
+    """int() que absorve NaN/None/texto — o relatório tem colunas incompletas."""
+    try:
+        if valor is None or pd.isna(valor):
+            return padrao
+        return int(valor)
+    except (TypeError, ValueError):
+        return padrao
+
+
+def renovou(antes, depois):
+    """A renovação valeu? O critério é ter folga, não o contador ter subido.
+
+    Um bounce partindo de um token já cheio (30:00) não faz o número crescer, e exigir
+    crescimento reprovava uma renovação perfeitamente boa."""
+    if depois is None:
+        return antes is None
+    return depois > (antes or 0) or depois > MARGEM_RENOVACAO_SEG
+
+
+def _mmss(segundos):
+    if segundos is None:
+        return "??:??"
+    return f"{segundos // 60:02d}:{segundos % 60:02d}"
+
+
 def levenshtein_distance(s1, s2):
     if len(s1) < len(s2):
         return levenshtein_distance(s2, s1)
@@ -64,7 +161,6 @@ def levenshtein_distance(s1, s2):
         previous_row = current_row
     return previous_row[-1]
 
-# Função para calcular similaridade baseada em Levenshtein
 def similarity(s1, s2):
     s1 = s1.lower().strip().replace(' ', '').replace('.', '').replace('_', '').replace('/', '')
     s2 = s2.lower().strip().replace(' ', '').replace('.', '').replace('_', '').replace('/', '')
@@ -72,13 +168,14 @@ def similarity(s1, s2):
     max_len = max(len(s1), len(s2))
     return 1 - (distance / max_len) if max_len != 0 else 1.0
 
-# Função para detectar a versão do Chrome instalado no Windows
 def get_chrome_major_version():
     """Retorna a versão principal (ex: 149) do Chrome instalado, ou None se não detectada.
     Assim o chromedriver baixado sempre corresponde ao navegador, mesmo após atualizações."""
+    if os.name != "nt":
+        return None
+
     import winreg
 
-    # 1) Chave de registro gravada pelo próprio Chrome (atualizada a cada execução/update)
     for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
         try:
             with winreg.OpenKey(hive, r"Software\Google\Chrome\BLBeacon") as key:
@@ -87,7 +184,6 @@ def get_chrome_major_version():
         except (OSError, ValueError, IndexError):
             continue
 
-    # 2) Fallback: versão do arquivo chrome.exe nos caminhos de instalação conhecidos
     candidates = []
     try:
         with winreg.OpenKey(
@@ -117,28 +213,41 @@ def get_chrome_major_version():
 
     return None
 
-# Função para inicializar o driver
-def init_driver():
+def abrir_chrome(browser_executable_path=None):
+    """Sobe um Chrome com o chromedriver correspondente à versão instalada.
+
+    `browser_executable_path` fixa qual navegador usar. Sem ele, o undetected_chromedriver
+    escolhe sozinho — e numa máquina com Chrome e Chromium instalados a escolha varia
+    entre execuções, o que torna qualquer teste local irreprodutível.
+
+    A segunda tentativa não é luxo: a versão nem sempre é detectável de antemão (fora
+    do Windows não há registro para consultar, e o navegador efetivamente lançado pode
+    ser outro — um Chromium do sistema em vez do Chrome). A mensagem de erro do driver
+    informa a versão real, e é dela que partimos."""
     version_main = get_chrome_major_version()
     if version_main:
-        print(f"🌐 Chrome detectado: versão {version_main}")
+        log(f"Chrome detectado: versão {version_main}")
     else:
-        print("⚠️ Versão do Chrome não detectada. Usando a versão mais recente do driver.")
+        log("Versão do Chrome não detectada. Usando a versão mais recente do driver.", "aviso")
     try:
-        driver = uc.Chrome(options=Options(), version_main=version_main)
+        return uc.Chrome(options=Options(), version_main=version_main,
+                         browser_executable_path=browser_executable_path)
     except SessionNotCreatedException as e:
-        # Última defesa: a mensagem de erro do driver informa a versão real do navegador
         match = re.search(r"Current browser version is (\d+)", str(e))
         if not match:
             raise
         browser_major = int(match.group(1))
-        print(f"🔁 Driver incompatível com o navegador. Baixando driver para o Chrome {browser_major}...")
-        driver = uc.Chrome(options=Options(), version_main=browser_major)
+        log(f"Driver incompatível com o navegador. Baixando driver para o Chrome {browser_major}...", "aviso")
+        return uc.Chrome(options=Options(), version_main=browser_major,
+                         browser_executable_path=browser_executable_path)
+
+
+def init_driver():
+    driver = abrir_chrome()
     driver.execute_cdp_cmd('Storage.clearDataForOrigin', {"origin": '*', "storageTypes": 'all'})
     driver.get('https://portal.transferegov.sistema.gov.br/portal/home')
     return driver
 
-# Função para tratar dados da planilha
 def load_data():
     df = pd.read_excel(PLANILHA_PATH)
     df_filtrado = df[df.iloc[:, 4].notna()]
@@ -147,18 +256,16 @@ def load_data():
     precosUnit = df_filtrado.iloc[:, 4].astype(float).apply(lambda x: f"{x:.2f}").tolist()
     return descricoes, precosUnit
 
-# Função para obter elementos frescos da página com timeout maior e retry
 def get_fresh_edit_icons(driver):
-    for _ in range(5):  # Mais retries
+    for _ in range(5):
         try:
             return WebDriverWait(driver, DEFAULT_TIMEOUT).until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'i.fa.fa-pencil'))
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, ICONE_EDITAR))
             )
         except (StaleElementReferenceException, TimeoutException):
             velocity_sleep(2)
     raise TimeoutException("Falha ao obter ícones de edição após retries")
 
-# Função genérica para clique via JS com mais retries e delay maior
 def js_click(driver, css, action='click', text='', retries=10, delay=2):
     for attempt in range(retries):
         try:
@@ -171,11 +278,10 @@ def js_click(driver, css, action='click', text='', retries=10, delay=2):
                 driver.execute_script("arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input', {bubbles: true}));", element, text)
             return True
         except (StaleElementReferenceException, TimeoutException, ElementClickInterceptedException) as e:
-            print(f"⚠️ Tentativa {attempt+1} falhou em {css}: {type(e).__name__} - {e}")
+            log(f"Tentativa {attempt+1} falhou em {css}: {type(e).__name__}", "aviso")
             velocity_sleep(delay)
     return False
 
-# Função para clique via XPath com waits maiores
 def click_and_write(driver, path, action, text=''):
     try:
         element = WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.element_to_be_clickable((By.XPATH, path)))
@@ -186,10 +292,9 @@ def click_and_write(driver, path, action, text=''):
             element.send_keys(text)
         return True
     except Exception as e:
-        print(f"⚠️ Erro em click_and_write para {path}: {e}")
+        log(f"Erro em click_and_write para {path}: {e}", "aviso")
         return False
 
-# Função para navegar para uma página específica com handling melhorado
 def go_to_page(driver, page_num):
     try:
         WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'ul.pagination.paginacao')))
@@ -200,8 +305,8 @@ def go_to_page(driver, page_num):
             if button.text.strip() == str(page_num + 1):
                 driver.execute_script("arguments[0].scrollIntoView(true);", button)
                 ActionChains(driver).move_to_element(button).click().perform()
-                WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'i.fa.fa-pencil')))
-                velocity_sleep(2)  # Delay adicional após navegação
+                WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, ICONE_EDITAR)))
+                velocity_sleep(2)
                 return True
         
         current_page = pagina_atual(driver)
@@ -210,17 +315,16 @@ def go_to_page(driver, page_num):
             next_button = WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.element_to_be_clickable((By.CSS_SELECTOR, next_button_selector)))
             driver.execute_script("arguments[0].click();", next_button)
             WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.staleness_of(next_button))
-            WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'i.fa.fa-pencil')))
-            velocity_sleep(2)  # Delay adicional
+            WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, ICONE_EDITAR)))
+            velocity_sleep(2)
         return True
     except TimeoutException:
-        print(f"Timeout ao navegar para página {page_num+1}")
+        log(f"Timeout ao navegar para página {page_num+1}", "aviso")
         return False
     except Exception as e:
-        print(f"Erro ao navegar para página {page_num+1}: {e}")
+        log(f"Erro ao navegar para página {page_num+1}: {e}", "aviso")
         return False
 
-# Função auxiliar para obter página atual com retry
 def pagina_atual(driver):
     try:
         active_page = WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'ul.pagination.paginacao li.active a')))
@@ -228,33 +332,242 @@ def pagina_atual(driver):
     except:
         return 0
 
-# Função para manejar popup de reinício de sessão com timeout menor para checagem rápida
-def handle_session_popup(driver):
+
+def tempo_restante(driver):
+    """Segundos de vida restantes do token, lidos de #tempoRestante ("MM:SS").
+
+    O cronômetro é do shell externo do TransfereGov e acompanha toda a navegação,
+    inclusive o formulário de edição. Custo de ~5ms — pode ser chamado a cada item."""
     try:
-        popup_button = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'button.btn.btn-primary[type="button"]')))
-        if popup_button.text.strip() == 'Sim':
-            print("🛡️ Detectado popup de reinício de sessão. Clicando em 'Sim'...")
-            popup_button.click()
-            WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.invisibility_of_element_located((By.CSS_SELECTOR, 'button.btn.btn-primary[type="button"]')))
-            return True
-    except TimeoutException:
-        return False
-    except Exception as e:
-        print(f"Erro ao manejar popup: {e}")
+        texto = driver.execute_script(
+            "var el = document.querySelector('#%s');"
+            "return el ? el.textContent.trim() : null;" % CRONOMETRO_ID
+        )
+    except WebDriverException:
+        return None
+    if not texto:
+        return None
+    match = re.match(r'^(\d+):(\d{2})$', texto)
+    if not match:
+        return None
+    return int(match.group(1)) * 60 + int(match.group(2))
+
+
+def inspecionar_modal(driver):
+    """Estado do diálogo modal na tela, como (estado, html).
+
+    O modal é criado e destruído dinamicamente — não fica escondido no DOM. Logo a
+    ausência de `.modal-dialog` já é resposta definitiva, sem custo de espera.
+
+    Um `.modal-dialog` que NÃO seja o de sessão devolve MODAL_DESCONHECIDO: clicar no
+    botão primário de um diálogo que não sabemos o que é seria confirmar de olhos
+    fechados, então o chamador registra e escala em vez de clicar."""
+    try:
+        dados = driver.execute_script(
+            "var el = document.querySelector('.modal-dialog');"
+            "return el ? {texto: el.innerText, html: el.outerHTML} : null;"
+        )
+    except WebDriverException:
+        return MODAL_AUSENTE, None
+
+    if not dados:
+        return MODAL_AUSENTE, None
+
+    if 'reiniciar sessao' in _normalizar(dados.get('texto')):
+        return MODAL_SESSAO, dados.get('html')
+    return MODAL_DESCONHECIDO, dados.get('html')
+
+
+def renovar_via_modal(driver):
+    """Clica "Sim" no modal de reinício de sessão — caminho mais barato: ~2s e não
+    tira a automação do lugar. Confirma o sucesso pelo cronômetro, não pela fé."""
+    antes = tempo_restante(driver)
+    try:
+        clicado = driver.execute_script(
+            "var btns = document.querySelectorAll('%s');"
+            "if (!btns.length) return false;" % BTN_MODAL_SIM +
+            "for (var i = 0; i < btns.length; i++) {"
+            "  if (btns[i].textContent.trim().toLowerCase().indexOf('sim') === 0) {"
+            "    btns[i].click(); return true;"
+            "  }"
+            "}"
+            "btns[0].click(); return true;"
+        )
+    except WebDriverException as e:
+        log(f"Erro ao clicar em 'Sim' no modal: {e}", "aviso")
         return False
 
-# Função para navegação inicial e login com verificações e delays
-def navigate_and_login(driver):
+    if not clicado:
+        log("Modal de sessão sem botão primário clicável.", "aviso")
+        return False
+
+    if not aguardar(lambda: inspecionar_modal(driver)[0] == MODAL_AUSENTE):
+        log("Cliquei em 'Sim' mas o modal não sumiu.", "aviso")
+        return False
+
+    depois = tempo_restante(driver)
+    if not renovou(antes, depois):
+        log(f"Modal fechou mas o token não renovou ({_mmss(antes)} → {_mmss(depois)}).", "aviso")
+        return False
+
+    log(f"Sessão renovada pelo modal. Tempo restante: {_mmss(depois)}", "ok")
+    return True
+
+
+def bounce_logo(driver):
+    """Renova o token clicando na logo do TransfereGov (#lnkPrincipal).
+
+    É uma navegação real do módulo legado (ForwardAction.do), não um router link do
+    Angular. Três efeitos de uma vez: renova a sessão do sistema externo, reconstrói
+    a árvore Angular inteira (nenhuma referência stale sobrevive) e devolve à Página
+    Principal, de onde `navegar_ate_planilha` sabe continuar — sem login nem captcha.
+
+    O clique é via JS justamente para atravessar o backdrop caso o modal esteja
+    aberto e o "Sim" tenha falhado."""
+    antes = tempo_restante(driver)
+    try:
+        clicado = driver.execute_script(
+            "var el = document.querySelector('#%s');"
+            "if (!el) return false;"
+            "el.click(); return true;" % LOGO_PRINCIPAL_ID
+        )
+    except WebDriverException as e:
+        log(f"Erro ao clicar na logo: {e}", "erro")
+        return False
+
+    if not clicado:
+        log(f"Logo #{LOGO_PRINCIPAL_ID} ausente na tela. Indo direto à Página Principal.")
+        try:
+            driver.get(URL_PRINCIPAL_LEGADO)
+        except WebDriverException as e:
+            log(f"Falha ao navegar para a Página Principal: {e}", "erro")
+            return False
+
+    try:
+        WebDriverWait(driver, DEFAULT_TIMEOUT).until(
+            EC.presence_of_element_located((By.ID, MENU_PRINCIPAL_ID))
+        )
+    except TimeoutException:
+        log(f"Após a logo, #{MENU_PRINCIPAL_ID} não apareceu — não voltamos à Página Principal.", "erro")
+        return False
+
+    depois = tempo_restante(driver)
+    if not renovou(antes, depois):
+        log(f"Voltei à Página Principal mas o token não renovou ({_mmss(antes)} → {_mmss(depois)}).", "aviso")
+        return False
+
+    log(f"Sessão renovada pela logo. Tempo restante: {_mmss(depois)}", "ok")
+    return True
+
+
+def sessao_expirada(driver):
+    """True quando o navegador foi jogado para fora da área autenticada.
+
+    Deliberadamente restrito ao domínio de SSO: um falso positivo aqui força um
+    reinício completo com captcha, que é exatamente o que estamos tentando evitar."""
+    try:
+        url = (driver.current_url or '').lower()
+    except WebDriverException:
+        return True
+    return 'sso.acesso.gov.br' in url
+
+
+def recuperar_navegacao(driver, pagina):
+    """Recuperação leve: renova pela logo e refaz o caminho até a planilha, mantendo
+    o mesmo navegador e a mesma sessão gov.br. Sem captcha, sem intervenção humana."""
+    if not bounce_logo(driver):
+        raise RecuperacaoFalhou("não consegui renovar pela logo")
+    if not navegar_ate_planilha(driver):
+        raise RecuperacaoFalhou("não consegui re-navegar até a planilha")
+    if not go_to_page(driver, pagina):
+        raise RecuperacaoFalhou(f"não consegui voltar para a página {pagina + 1}")
+    log(f"Recuperação leve concluída — de volta à página {pagina + 1}.", "ok")
+    return True
+
+
+def garantir_sessao(driver, pagina):
+    """Guarda de sessão. Chamar em ponto seguro: entre itens, sem formulário aberto.
+
+    Prevenir custa menos que remediar — por isso o limiar de renovação (5:00) fica
+    acima do momento em que o modal nasce (~3:00): na prática o modal quase nunca
+    chega a aparecer, e nunca aparece no meio de um preenchimento."""
+    estado, html = inspecionar_modal(driver)
+
+    if estado == MODAL_DESCONHECIDO:
+        log(f"Modal não reconhecido na tela. Não vou clicar em nada. HTML: {(html or '')[:400]}", "aviso")
+        return False
+
+    if estado == MODAL_SESSAO:
+        log("Modal de reinício de sessão detectado. Clicando em 'Sim'...")
+        if renovar_via_modal(driver):
+            return False
+        log("'Sim' não resolveu. Caindo para o bounce na logo (atravessa o backdrop)...", "aviso")
+        return recuperar_navegacao(driver, pagina)
+
+    restante = tempo_restante(driver)
+    if restante is None:
+        return False
+
+    if restante <= MARGEM_RENOVACAO_SEG:
+        log(f"Token com {_mmss(restante)} restantes (limiar {_mmss(MARGEM_RENOVACAO_SEG)}). Renovando preventivamente...")
+        return recuperar_navegacao(driver, pagina)
+
+    return False
+
+
+def dispensar_avisos(driver):
+    """Fecha caixas de comunicado do portal (ex.: o aviso da CGU) que ficam sobre a
+    tela e interceptam cliques nativos.
+
+    Casamos pelo texto do botão, não por posição no DOM: o TransfereGov publica esses
+    comunicados sem aviso prévio, e um seletor posicional quebraria no próximo. Custo
+    de uma consulta JS — não espera nada quando não há aviso."""
+    try:
+        fechados = driver.execute_script("""
+            var alvos = ['ok, entendi', 'ok entendi', 'entendi'];
+            var n = 0;
+            document.querySelectorAll('button, a.btn, input[type=button]').forEach(function (b) {
+                if (!b.offsetParent) return;
+                var t = (b.innerText || b.value || '').trim().toLowerCase();
+                if (alvos.indexOf(t) >= 0) { b.click(); n++; }
+            });
+            return n;
+        """)
+    except WebDriverException:
+        return False
+    if fechados:
+        log(f"{fechados} aviso(s) do portal dispensado(s).")
+    return bool(fechados)
+
+
+def login_inicial(driver):
+    """Do portal até a sessão autenticada. Único trecho que exige o usuário presente
+    (captcha), e por isso o único que a recuperação leve precisa evitar."""
     try:
         if not click_and_write(driver, '/html/body/portal-root/br-main-layout/div/div/div/main/portal-main/div/div[2]/div[2]/card/div/div/div[3]/button', 'click'):
             raise Exception("Falha ao clicar no botão inicial")
-        velocity_sleep(1)  # Delay para SPA
+        velocity_sleep(1)
+
+        aguardar(lambda: dispensar_avisos(driver), timeout=8, intervalo=0.5)
+
         if not click_and_write(driver, '//*[@id="form_submit_login"]', 'click'):
             raise Exception("Falha ao clicar no submit login")
         velocity_sleep(1)
 
         pyautogui.alert('Por favor, faça o login e realize o captcha. Em seguida, pressione OK para continuar')
+        return True
+    except Exception as e:
+        log(f"Erro durante o login inicial: {e}", "erro")
+        return False
 
+
+def navegar_ate_planilha(driver):
+    """Da Página Principal até a listagem de itens da planilha orçamentária.
+
+    Ponto de entrada compartilhado pelo fluxo normal e pela recuperação leve — é
+    exatamente onde a logo do TransfereGov nos deixa, o que permite reentrar aqui
+    sem refazer login."""
+    try:
         if not click_and_write(driver, '//*[@id="menuPrincipal"]/div[1]/div[4]', 'click'):
             raise Exception("Falha ao clicar no menu principal")
         velocity_sleep(1)
@@ -295,15 +608,15 @@ def navigate_and_login(driver):
             raise Exception("Falha ao clicar em Planilha Orçamentária")
         velocity_sleep(1)
 
-        WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'i.fa.fa-pencil')))
+        WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, ICONE_EDITAR)))
 
-        print('Iniciando preenchimento!!!!')
+        log(f"Listagem da planilha carregada. Token com {_mmss(tempo_restante(driver))} restantes.", "ok")
         return True
     except Exception as e:
-        print(f"Erro durante navegação/login: {e}")
+        log(f"Erro durante a navegação até a planilha: {e}", "erro")
         return False
 
-# Função para salvar ou concatenar relatório
+
 def save_or_concat(log_registros, save):
     df_log = pd.DataFrame(log_registros)
     if save is not None:
@@ -312,222 +625,274 @@ def save_or_concat(log_registros, save):
         df_concat.to_excel(RELATORIO_PATH, index=False)
     else:
         df_log.to_excel(RELATORIO_PATH, index=False)
-    print(f"📊 Relatório salvo em {RELATORIO_PATH}")
+    log(f"Relatório salvo em {RELATORIO_PATH}")
+
+
+def carregar_progresso():
+    """Último ponto salvo: (save, i, i_global, pagina, inicializacoes).
+
+    Toda leitura passa por _int_seguro porque as linhas de MISMATCH gravam a coluna
+    de inicializações vazia — um int(NaN) aqui derrubava a carga inteira e fazia a
+    automação recomeçar do item 1, reescrevendo tudo."""
+    try:
+        save = pd.read_excel(RELATORIO_PATH)
+    except FileNotFoundError:
+        log("Ponto salvo não encontrado. Iniciando do zero.")
+        return None, 0, 0, 0, 1
+    except Exception as e:
+        log(f"Não foi possível abrir o relatório ({e}). Iniciando do zero.", "aviso")
+        return None, 0, 0, 0, 1
+
+    try:
+        i_global = _int_seguro(save.iloc[-1, 0])
+        i = _int_seguro(save.iloc[-1, 1])
+        pagina = _int_seguro(save.iloc[-1, 2])
+
+        coluna = next((c for c in ("Inicializacoes", "inicializacoes") if c in save.columns), None)
+        if coluna is not None:
+            valores = pd.to_numeric(save[coluna], errors="coerce").dropna()
+            inicializacoes = int(valores.max()) + 1 if len(valores) else 1
+        else:
+            inicializacoes = 1
+
+        log(f"Ponto salvo encontrado! Retomando da iteração {i_global}, página {pagina+1}, item {i+1}.")
+        return save, i, i_global, pagina, inicializacoes
+    except Exception as e:
+        log(f"Relatório ilegível ({e}). Iniciando do zero.", "aviso")
+        return None, 0, 0, 0, 1
+
 
 def check_stop():
     return STOP_REQUESTED.is_set()
 
-# Função principal
+
 def run_filling():
     global RELATORIO_PATH
-    RELATORIO_PATH = get_relatorio_path()  # Update report path with current instrument number
+    RELATORIO_PATH = get_relatorio_path()
 
     global STOP_REQUESTED
     STOP_REQUESTED = threading.Event()
-    
-    # Loop principal com reinício automático
+
     descricoes, precosUnit = load_data()
     log_registros = []
 
-    # Carregar progresso salvo
-    try:
-        save = pd.read_excel(RELATORIO_PATH)
-        save_index_per_page = int(save.iloc[-1, 1])
-        save_general_index = int(save.iloc[-1, 0])
-        save_page = int(save.iloc[-1, 2])
-        if "Inicializacoes" in save.columns:
-            inicializacoes = int(save["Inicializacoes"].iloc[-1]) + 1
-        elif "inicializacoes" in save.columns:
-            inicializacoes = int(save["inicializacoes"].iloc[-1]) + 1
-        else:
-            inicializacoes = 1
-        i = save_index_per_page
-        i_global = save_general_index
-        pagina = save_page
-        print(f"Ponto salvo encontrado! Iniciando da iteração {i_global}, página {pagina+1}, item {i+1}")
-    except FileNotFoundError:
-        save = None
-        i = 0
-        i_global = 0
-        pagina = 0
-        inicializacoes = 1
-        print("Ponto salvo não encontrado! Iniciando do zero.")
-    except Exception as e:
-        print(f"Erro ao carregar save: {e}")
-        save = None
-        i = 0
-        i_global = 0
-        pagina = 0
+    save, i, i_global, pagina, inicializacoes = carregar_progresso()
+
+    driver = None
+    reinicios = 0
 
     while i_global < len(descricoes):
         if check_stop():
             break
 
+        if MAX_RESTARTS is not None and reinicios > MAX_RESTARTS:
+            log(f"Limite de {MAX_RESTARTS} reinicializações atingido. Encerrando.", "erro")
+            break
+
         driver = None
         try:
             driver = init_driver()
-            if not navigate_and_login(driver):
-                raise Exception("Falha na navegação/login inicial")
-            
+            if not login_inicial(driver):
+                raise Exception("Falha no login inicial")
+            if not navegar_ate_planilha(driver):
+                raise Exception("Falha na navegação inicial até a planilha")
+
+            falhas_leves = 0
+
             while i_global < len(descricoes):
                 if check_stop():
                     break
 
-                handle_session_popup(driver)
-                
-                if not go_to_page(driver, pagina):
-                    raise TimeoutException("Falha ao navegar para página")
-                
-                icones_editar = get_fresh_edit_icons(driver)
-                
-                if i >= len(icones_editar):
-                    print(f"🌐 Fim dos elementos na página {pagina+1}. Avançando...")
-                    pagina += 1
-                    i = 0
-                    continue
-                
-                tentativas = 0
-                while True:
-                    if check_stop():
-                        break
+                try:
+                    garantir_sessao(driver, pagina)
 
-                    for attempt in range(5):  # Tentativas para clicar no editar
+                    if not go_to_page(driver, pagina):
+                        raise TimeoutException("Falha ao navegar para página")
+
+                    icones_editar = get_fresh_edit_icons(driver)
+                    falhas_leves = 0
+
+                    if i >= len(icones_editar):
+                        log(f"Fim dos elementos na página {pagina+1}. Avançando...")
+                        pagina += 1
+                        i = 0
+                        continue
+
+                    tentativas = 0
+                    while True:
                         if check_stop():
                             break
 
-                        try:
-                            icones_editar = get_fresh_edit_icons(driver)
-                            icone = icones_editar[i]
-                            link_editar = icone.find_element(By.XPATH, './parent::a')
-                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link_editar)
-                            velocity_sleep(1)
-                            driver.execute_script("arguments[0].click();", link_editar)
-                            break
-                        except StaleElementReferenceException as e:
-                            print(f"🔄 Elemento stale na iteração {i_global}, tentativa {attempt+1}: {e}")
-                            velocity_sleep(3)
-                    else:
-                        raise StaleElementReferenceException("Falha persistente em stale element ao clicar edit")
+                        for attempt in range(5):
+                            if check_stop():
+                                break
 
-                    velocity_sleep(3)  # Delay para form carregar
-                    
-                    handle_session_popup(driver)
-                    
-                    try:
-                        WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'input[formcontrolname="precoUnitarioLicitado"]')))
-                    except TimeoutException as e:
-                        print(f"Timeout esperando campo de preço unitário: {e}")
-                        raise
-                    
-                    valor_atual = driver.execute_script("return document.querySelector('input[formcontrolname=\"precoUnitarioLicitado\"]').value;")
-                    descricao_site = driver.execute_script("return document.querySelector('p[id=\"descricao\"]').innerText;")
-                    
-                    print(f"🗒️ Iteração {i_global}: Descrição site -> {descricao_site}")
-                    print(f"🗒️ Iteração {i_global}: Descrição planilha -> {descricoes[i_global]}")
-                    
-                    # Calcular similaridade
-                    sim = similarity(descricao_site, descricoes[i_global])
-                    print(f"📏 Similaridade Levenshtein: {sim:.2f}")
-                    
-                    if sim >= SIMILARITY_THRESHOLD:
-                        print('✅ Descrições semelhantes o suficiente.')
-                        
-                        print(f"🖌️ Iteração {i_global}: Substituindo {valor_atual} por {precosUnit[i_global]}...")
-                        
-                        if not js_click(driver, 'input[formcontrolname="precoUnitarioLicitado"]', 'write', precosUnit[i_global]):
-                            raise Exception("Falha ao escrever valor")
-                        
-                        print(f"✅ Iteração {i_global}: Valor inserido com sucesso!")
-                        velocity_sleep(2)
-                        
-                        if not js_click(driver, 'button[class="btn btn-primary"]'):
-                            raise Exception("Falha ao clicar em salvar")
-                        
-                        WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CLASS_NAME, 'table')))
-                        velocity_sleep(2)  # Delay adicional após salvar
-                        
-                        log_registros.append({
-                            "Iteração Geral": i_global,
-                            "Iteração na pagina": i,
-                            "Pagina": pagina,
-                            "Descricao_Site": descricao_site,
-                            "Descricao_Planilha": descricoes[i_global],
-                            "Preco_Atual": valor_atual,
-                            "Preco_Novo": precosUnit[i_global],
-                            "Similaridade": sim,
-                            "Status": "OK",
-                            "Obs": "",
-                            "inicializacoes": inicializacoes
-                        })
-                        
-                        i += 1
-                        i_global += 1
-                        break  # Sai do loop de tentativas
-                        
-                    else:
-                        obs = f"Descrições divergentes (similaridade {sim:.2f} < {SIMILARITY_THRESHOLD})"
-                        print(f'⚠️ Atenção. {obs}! Favor verificar. Tentando novamente após voltar...')
-                        
-                        # Clique no botão "Voltar" específico
-                        if not js_click(driver, 'button.btn.btn-secondary.botao-voltar'):
-                            print("Falha ao clicar no botão Voltar com .btn.btn-secondary.botao-voltar. Tentando fallback...")
-                            js_click(driver, 'button.botao-voltar')
-                        
-                        WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CLASS_NAME, 'table')))
-                        velocity_sleep(2)  # Delay após voltar
-                        
-                        # Log da tentativa falha
-                        log_registros.append({
-                            "Iteração Geral": i_global,
-                            "Iteração na pagina": i,
-                            "Pagina": pagina,
-                            "Descricao_Site": descricao_site,
-                            "Descricao_Planilha": descricoes[i_global],
-                            "Preco_Atual": valor_atual,
-                            "Preco_Novo": precosUnit[i_global],
-                            "Similaridade": sim,
-                            "Status": "MISMATCH",
-                            "Obs": obs + f" - Tentativa {tentativas + 1}"
-                        })
-                        
-                        tentativas += 1
-                        if tentativas >= MAX_TRIES:
-                            print(f"🚫 Máximo de tentativas ({MAX_TRIES}) atingido para iteração {i_global}. Pulando item...")
-                            log_registros[-1]["Status"] = "SKIPPED"
-                            log_registros[-1]["Obs"] += " - Pulado após max tentativas"
+                            try:
+                                icones_editar = get_fresh_edit_icons(driver)
+                                icone = icones_editar[i]
+                                link_editar = icone.find_element(By.XPATH, './parent::a')
+                                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", link_editar)
+                                velocity_sleep(1)
+                                driver.execute_script("arguments[0].click();", link_editar)
+                                break
+                            except StaleElementReferenceException:
+                                log(f"Elemento stale na iteração {i_global}, tentativa {attempt+1}", "aviso")
+                                velocity_sleep(3)
+                        else:
+                            raise StaleElementReferenceException("Falha persistente em stale element ao clicar edit")
+
+                        velocity_sleep(3)
+
+                        try:
+                            WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'input[formcontrolname="precoUnitarioLicitado"]')))
+                        except TimeoutException as e:
+                            log(f"Timeout esperando campo de preço unitário: {e}", "aviso")
+                            raise
+
+                        valor_atual = driver.execute_script("return document.querySelector('input[formcontrolname=\"precoUnitarioLicitado\"]').value;")
+                        descricao_site = driver.execute_script("return document.querySelector('p[id=\"descricao\"]').innerText;")
+
+                        log(f"Iteração {i_global}: site -> {descricao_site}")
+                        log(f"Iteração {i_global}: planilha -> {descricoes[i_global]}")
+
+                        sim = similarity(descricao_site, descricoes[i_global])
+                        log(f"Similaridade Levenshtein: {sim:.2f}")
+
+                        if sim >= SIMILARITY_THRESHOLD:
+                            log('Descrições semelhantes o suficiente.', "ok")
+
+                            log(f"Iteração {i_global}: substituindo {valor_atual} por {precosUnit[i_global]}...")
+
+                            if not js_click(driver, 'input[formcontrolname="precoUnitarioLicitado"]', 'write', precosUnit[i_global]):
+                                raise Exception("Falha ao escrever valor")
+
+                            velocity_sleep(2)
+
+                            estado_modal, _ = inspecionar_modal(driver)
+                            if estado_modal == MODAL_SESSAO:
+                                log("Modal apareceu com o formulário aberto. Renovando antes de salvar...", "aviso")
+                                renovar_via_modal(driver)
+
+                            if not js_click(driver, BTN_SALVAR):
+                                raise Exception("Falha ao clicar em salvar")
+
+                            WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CLASS_NAME, 'table')))
+                            velocity_sleep(2)
+
+                            log(f"Iteração {i_global}: valor inserido com sucesso!", "ok")
+
+                            log_registros.append({
+                                "Iteração Geral": i_global,
+                                "Iteração na pagina": i,
+                                "Pagina": pagina,
+                                "Descricao_Site": descricao_site,
+                                "Descricao_Planilha": descricoes[i_global],
+                                "Preco_Atual": valor_atual,
+                                "Preco_Novo": precosUnit[i_global],
+                                "Similaridade": sim,
+                                "Status": "OK",
+                                "Obs": "",
+                                "inicializacoes": inicializacoes
+                            })
+
                             i += 1
                             i_global += 1
                             break
-                        # Continua o loop para tentar novamente o mesmo item
-                
-                if i_global % 10 == 0:
-                    save_or_concat(log_registros, save)
-                    log_registros = []
-                    save = pd.read_excel(RELATORIO_PATH)
-            
+
+                        else:
+                            obs = f"Descrições divergentes (similaridade {sim:.2f} < {SIMILARITY_THRESHOLD})"
+                            log(f'{obs}! Favor verificar. Tentando novamente após voltar...', "aviso")
+
+                            if not js_click(driver, 'button.btn.btn-secondary.botao-voltar'):
+                                log("Falha no Voltar com .btn.btn-secondary.botao-voltar. Tentando fallback...", "aviso")
+                                js_click(driver, 'button.botao-voltar')
+
+                            WebDriverWait(driver, DEFAULT_TIMEOUT).until(EC.visibility_of_element_located((By.CLASS_NAME, 'table')))
+                            velocity_sleep(2)
+
+                            log_registros.append({
+                                "Iteração Geral": i_global,
+                                "Iteração na pagina": i,
+                                "Pagina": pagina,
+                                "Descricao_Site": descricao_site,
+                                "Descricao_Planilha": descricoes[i_global],
+                                "Preco_Atual": valor_atual,
+                                "Preco_Novo": precosUnit[i_global],
+                                "Similaridade": sim,
+                                "Status": "MISMATCH",
+                                "Obs": obs + f" - Tentativa {tentativas + 1}",
+                                "inicializacoes": inicializacoes
+                            })
+
+                            tentativas += 1
+                            if tentativas >= MAX_TRIES:
+                                log(f"Máximo de tentativas ({MAX_TRIES}) atingido para iteração {i_global}. Pulando item...", "aviso")
+                                log_registros[-1]["Status"] = "SKIPPED"
+                                log_registros[-1]["Obs"] += " - Pulado após max tentativas"
+                                i += 1
+                                i_global += 1
+                                break
+
+                    if i_global % 10 == 0:
+                        save_or_concat(log_registros, save)
+                        log_registros = []
+                        save = pd.read_excel(RELATORIO_PATH)
+
+                except RecuperacaoFalhou as e:
+                    log(f"Recuperação leve falhou: {e}", "erro")
+                    raise
+                except Exception as e:
+                    if check_stop():
+                        break
+
+                    falhas_leves += 1
+                    log(f"Falha no item {i_global}: {type(e).__name__} - {e}", "aviso")
+
+                    if sessao_expirada(driver):
+                        log("A sessão gov.br caiu de fato — reinício completo é inevitável.", "erro")
+                        raise
+                    if falhas_leves > MAX_RECUPERACOES_LEVES:
+                        log(f"{falhas_leves} falhas seguidas. Escalando para reinício completo.", "erro")
+                        raise
+
+                    log(f"Recuperação leve {falhas_leves}/{MAX_RECUPERACOES_LEVES}, sem captcha...")
+                    recuperar_navegacao(driver, pagina)
+
         except Exception as e:
-            print(f"⚠️ Erro crítico na iteração {i_global}: {e}. Reiniciando processo...")
+            log(f"Erro crítico na iteração {i_global}: {e}. Reiniciando o navegador...", "erro")
             if log_registros:
                 save_or_concat(log_registros, save)
                 log_registros = []
+                try:
+                    save = pd.read_excel(RELATORIO_PATH)
+                except Exception:
+                    save = None
             if driver:
-                driver.quit()
-            time.sleep(10)  # Delay maior antes de reiniciar
+                try:
+                    driver.quit()
+                except WebDriverException:
+                    pass
+                driver = None
+            reinicios += 1
+            inicializacoes += 1
+            if check_stop():
+                break
+            time.sleep(10)
             continue
 
-    # Salvar relatório final
     if log_registros:
         save_or_concat(log_registros, save)
 
-    if STOP_REQUESTED.is_set():
-        print("Processo interrompido pelo usuário.")
-        if driver:
-            driver.quit()
-        return
-
     if driver:
-        driver.quit()
+        try:
+            driver.quit()
+        except WebDriverException:
+            pass
 
-# Entry point
+    if STOP_REQUESTED.is_set():
+        log("Processo interrompido pelo usuário.", "aviso")
+    else:
+        log(f"Preenchimento concluído. {reinicios} reinicialização(ões) pesada(s).", "ok")
+
 if __name__ == "__main__":
     run_filling()

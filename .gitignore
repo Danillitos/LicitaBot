@@ -6,5 +6,7 @@ gui-test
 *.xlsx
 *.pyc
 *.spec
+!LicitaBot.spec
 /build
 /dist
+teste_navegacao.py

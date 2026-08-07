@@ -19,7 +19,6 @@ DEFAULT_CONFIG = {
 def save_config(app):
     """Save current configuration to JSON file."""
     try:
-        # Validate and get values with defaults
         instrumento = app.entry_num.get() or ""
         planilha_path = app.entry_dir.get() or ""
         precisao = app.entry_precisao.get() or "85"
@@ -52,7 +51,6 @@ def load_config(app):
             with open(CONFIG_FILE, "r") as f:
                 config = json.load(f)
             
-            # Wait for widgets to be created before loading
             app.after(100, lambda: app._apply_config(config))
         except Exception as e:
             app.show_message(f"Erro ao carregar configuração: {e}", "warning")
@@ -80,11 +78,9 @@ def load_default_config(app):
 def apply_config(app, config: dict):
     """Apply configuration values to the UI."""
     try:
-        # Only apply if widgets are initialized
         if app.entry_precisao is None:
             return
         
-        # Load instrumento and planilha_path
         app.entry_num.delete(0, "end")
         app.entry_num.insert(0, config.get("instrumento", DEFAULT_CONFIG["instrumento"]))
         

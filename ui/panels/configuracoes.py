@@ -6,7 +6,6 @@ def build_configuracoes(app, parent):
     p = make_panel(parent)
     p.grid(row=2, column=0, columnspan=2, padx=14, pady=(0, 14), sticky="nsew")
 
-    # ── Title row with buttons ────────────────────────────────────────────────
     title_row = ctk.CTkFrame(p, fg_color="transparent")
     title_row.pack(fill="x", padx=6, pady=(14, 8))
 
@@ -61,12 +60,10 @@ def build_configuracoes(app, parent):
 
     divider(p)
 
-    # ── Inner columns ─────────────────────────────────────────────────────────
     cfg_inner = ctk.CTkFrame(p, fg_color="transparent")
     cfg_inner.pack(fill="both", expand=True, padx=4, pady=(0, 10))
     cfg_inner.columnconfigure((0, 1, 2), weight=1)
 
-    # ── Col 0 – sliders ───────────────────────────────────────────────────────
     col0 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
     col0.grid(row=0, column=0, sticky="nsew", padx=(8, 4))
 
@@ -83,12 +80,10 @@ def build_configuracoes(app, parent):
         tooltip="Define a velocidade de preenchimento da automação no sistema TransfereGov. Quanto maior o valor, mais rápido o preenchimento, porém mais instável a automação, aumentando o risco de falhas e interrupções.",
     )
 
-    # Vertical separator
     ctk.CTkFrame(cfg_inner, width=1, fg_color=PANEL_BORDER).grid(
         row=0, column=1, sticky="ns", padx=4, pady=6
     )
 
-    # ── Col 1 – small entries ─────────────────────────────────────────────────
     col1 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
     col1.grid(row=0, column=1, sticky="nsew", padx=12)
 
@@ -100,12 +95,10 @@ def build_configuracoes(app, parent):
 
     _build_restarts_row(app, col1)
 
-    # Vertical separator
     ctk.CTkFrame(cfg_inner, width=1, fg_color=PANEL_BORDER).grid(
         row=0, column=2, sticky="ns", padx=4, pady=6
     )
 
-    # ── Col 2 – checkbox ──────────────────────────────────────────────────────
     """ Ainda para ser desenvolvido
     col2 = ctk.CTkFrame(cfg_inner, fg_color="transparent")
     col2.grid(row=0, column=2, sticky="nsew", padx=12)
@@ -129,7 +122,6 @@ def build_configuracoes(app, parent):
     
     """
 
-    # ── Start button ──────────────────────────────────────────────────────────
     footer_frame = ctk.CTkFrame(p, fg_color="transparent")
     footer_frame.pack(fill="x", padx=12, pady=(10, 12))
     footer_frame.pack_propagate(False)
@@ -161,7 +153,6 @@ def build_configuracoes(app, parent):
     ).pack(side="right", anchor="e", padx=(0, 12))
 
 
-# ── Private helpers ───────────────────────────────────────────────────────────
 def _small_entry(parent, label, width=90, tooltip=""):
     """Small labeled entry used inside the config panel."""
     f = ctk.CTkFrame(parent, fg_color="transparent")

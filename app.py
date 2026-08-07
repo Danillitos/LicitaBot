@@ -10,15 +10,12 @@ from ui.panels.info import build_info
 from ui.panels.sheets import build_sheets
 from ui.panels.configuracoes import build_configuracoes
 import threading
+import multiprocessing
 
 
-# ── Appearance ────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Main App
-# ══════════════════════════════════════════════════════════════════════════════
 class LicitaBotApp(ctk.CTk):
     _save_config = save_config
     _load_config = load_config
@@ -37,7 +34,6 @@ class LicitaBotApp(ctk.CTk):
         self.configure(fg_color=MAIN_BG)
         self.resizable(False, False)
 
-        # Info variables
         self.var_total           = tk.StringVar(value="0")
         self.var_filled          = tk.StringVar(value="0")
         self.var_remaining       = tk.StringVar(value="0")
@@ -46,13 +42,11 @@ class LicitaBotApp(ctk.CTk):
         self.var_auto_login      = tk.BooleanVar(value=False)
         self.var_use_restarts    = tk.BooleanVar(value=True)
         
-        # Configuration sliders and entries (will be created in _build_main)
         self.slider_precisao     = None
         self.slider_velocidade   = None
         self.entry_attempts      = None
         self.entry_restarts      = None
         
-        # Message display and loading spinner
         self.message_display     = None
         self.loading_spinner     = None
         self.loading_label       = None
@@ -62,7 +56,6 @@ class LicitaBotApp(ctk.CTk):
         self._build_footer()
         self._load_config()
 
-        # Show startup message
         self.show_message("✓ LicitaBot iniciado com sucesso!", "success")
 
         self.bind_all(
@@ -98,14 +91,12 @@ class LicitaBotApp(ctk.CTk):
             fill="x"
         )
 
-    # ── Body ─────────────────────────────────────────────────────────────────
     def _build_body(self):
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True)
         self._build_sidebar(body)
         self._build_main(body)
 
-    # ── Sidebar ───────────────────────────────────────────────────────────────
     def _build_sidebar(self, parent):
         sidebar = ctk.CTkFrame(parent, fg_color=SIDEBAR_BG, width=175, corner_radius=0)
         sidebar.pack(fill="y", side="left")
@@ -134,7 +125,6 @@ class LicitaBotApp(ctk.CTk):
             anchor="center",
         ).pack(side="bottom", pady=8)
 
-    # ── Main content ──────────────────────────────────────────────────────────
     def _build_main(self, parent):
         main = ctk.CTkFrame(parent, fg_color=MAIN_BG)
         main.pack(fill="both", expand=True)
@@ -150,16 +140,13 @@ class LicitaBotApp(ctk.CTk):
         build_sheets(self, main)
         build_configuracoes(self, main)
 
-    # ── Footer with message display ────────────────────────────────────────────
     def _build_footer(self):
         footer = ctk.CTkFrame(self, fg_color=PANEL_BG, height=120, corner_radius=0)
         footer.pack(fill="x", side="bottom", padx=14, pady=(0, 14))
         footer.pack_propagate(False)
 
-        # Border on top
         ctk.CTkFrame(footer, height=1, fg_color=PANEL_BORDER).pack(fill="x", pady=(0, 8))
 
-        # Message display with scrollbar
         msg_frame = ctk.CTkFrame(footer, fg_color=LISTBOX_BG, border_width=1, border_color=FIELD_BORDER, corner_radius=4)
         msg_frame.pack(fill="both", expand=True, padx=0, pady=(0, 8))
         msg_frame.columnconfigure(0, weight=1)
@@ -175,7 +162,7 @@ class LicitaBotApp(ctk.CTk):
             highlightthickness=0,
             wrap="word",
             height=4,
-            state="disabled",  # Make it read-only
+            state="disabled",
         )
         self.message_display.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
@@ -183,7 +170,6 @@ class LicitaBotApp(ctk.CTk):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.message_display.configure(yscrollcommand=scrollbar.set)
 
-        # Configure text tags for different message types
         self.message_display.tag_config("success", foreground="#4A7C59")
         self.message_display.tag_config("error", foreground="#8B3A3A")
         self.message_display.tag_config("info", foreground="#2D4A5A")
@@ -196,24 +182,18 @@ class LicitaBotApp(ctk.CTk):
         if self.message_display is None:
             return
 
-        # Enable text widget for editing
         self.message_display.config(state="normal")
         
-        # Add timestamp
         import datetime
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         
-        # Add message with tag
         self.message_display.insert("end", f"[{timestamp}] {message}\n", msg_type)
         
-        # Disable text widget again
         self.message_display.config(state="disabled")
         
-        # Auto-scroll to bottom
         self.message_display.see("end")
         self.update()
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
     def _browse(self, entry_widget):
         path = filedialog.askopenfilename(
             filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
@@ -268,7 +248,6 @@ class LicitaBotApp(ctk.CTk):
 
         return entry
 
-    # ── Button callbacks ──────────────────────────────────────────────────────
     def _select_sheet(self):
         sel = self.listbox.curselection()
         if not sel:
@@ -298,7 +277,6 @@ class LicitaBotApp(ctk.CTk):
             self.listbox.insert("end", "Nenhuma planilha encontrada")
 
     def _start_filling(self):
-        # Validation
         errors = []
         
         if not self.entry_num.get().strip():
@@ -324,7 +302,6 @@ class LicitaBotApp(ctk.CTk):
             self.show_message(error_msg, "error")
             return
         
-        # Prepare configuration
         config = {
             "instrumento": self.entry_num.get().strip(),
             "planilha_path": self.entry_dir.get().strip(),
@@ -362,7 +339,6 @@ class LicitaBotApp(ctk.CTk):
 
     def _call_main(self, config: dict):
         try:
-            # Load main.py as a module
             import main as main_module
 
             main_module.PRE_INSTRUMENTO = config['instrumento']
@@ -384,7 +360,8 @@ class LicitaBotApp(ctk.CTk):
             import traceback
             traceback.print_exc()
 
-# ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
+
     app = LicitaBotApp()
     app.mainloop()
