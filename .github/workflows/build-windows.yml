@@ -20,6 +20,7 @@ jobs:
           # wheel para 3.13+, e sem wheel o runner tentaria compilar do zero.
           python-version: '3.12'
           cache: pip
+          cache-dependency-path: requeriments.txt
 
       - name: Instalar dependências
         run: |
