@@ -11,6 +11,7 @@ from ui.panels.sheets import build_sheets
 from ui.panels.configuracoes import build_configuracoes
 import threading
 import multiprocessing
+import sys
 
 
 ctk.set_appearance_mode("light")
@@ -362,6 +363,12 @@ class LicitaBotApp(ctk.CTk):
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
 
     app = LicitaBotApp()
     app.mainloop()

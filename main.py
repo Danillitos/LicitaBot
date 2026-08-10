@@ -662,6 +662,37 @@ def carregar_progresso():
         return None, 0, 0, 0, 1
 
 
+def diagnostico(driver, contexto):
+    """Fotografia da tela no momento da falha, gravada no log.
+
+    Existe para que o relato do usuário ("parou e não fez nada") venha acompanhado do
+    que estava na tela — sem isso, cada incidente vira uma rodada de adivinhação."""
+    try:
+        log(f"--- diagnóstico: {contexto} ---", "aviso")
+        log(f"    URL   : {driver.current_url}")
+        log(f"    token : {_mmss(tempo_restante(driver))}")
+        contagens = driver.execute_script("""
+            var alvos = ['i.fa.fa-pencil', 'ul.pagination.paginacao', 'table',
+                         'input[formcontrolname=\'precoUnitarioLicitado\']',
+                         'p#descricao', '.modal-dialog', 'button.btn.btn-primary',
+                         'button.btn.btn-primary:not(.modal-dialog button)'];
+            var r = {};
+            alvos.forEach(function (a) {
+                try { r[a] = document.querySelectorAll(a).length; }
+                catch (e) { r[a] = 'SELETOR INVÁLIDO: ' + e.name; }
+            });
+            return r;""")
+        for seletor, quantos in contagens.items():
+            log(f"    {quantos!s:>4}  {seletor}")
+        botoes = driver.execute_script("""
+            return [...document.querySelectorAll('button')].filter(function (b) { return b.offsetParent; })
+              .slice(0, 12).map(function (b) {
+                  return '"' + (b.innerText || '').trim().slice(0, 26) + '" class=' + b.className; });""")
+        log(f"    botões visíveis: {botoes}")
+    except WebDriverException as e:
+        log(f"    (diagnóstico indisponível: {type(e).__name__})", "aviso")
+
+
 def check_stop():
     return STOP_REQUESTED.is_set()
 
@@ -711,6 +742,9 @@ def run_filling():
 
                     icones_editar = get_fresh_edit_icons(driver)
                     falhas_leves = 0
+                    log(f"Página {pagina+1}: {len(icones_editar)} itens na tela; "
+                        f"posição {i} (global {i_global}/{len(descricoes)}); "
+                        f"token {_mmss(tempo_restante(driver))}")
 
                     if i >= len(icones_editar):
                         log(f"Fim dos elementos na página {pagina+1}. Avançando...")
@@ -847,6 +881,7 @@ def run_filling():
 
                     falhas_leves += 1
                     log(f"Falha no item {i_global}: {type(e).__name__} - {e}", "aviso")
+                    diagnostico(driver, f"falha no item {i_global}")
 
                     if sessao_expirada(driver):
                         log("A sessão gov.br caiu de fato — reinício completo é inevitável.", "erro")
@@ -860,6 +895,8 @@ def run_filling():
 
         except Exception as e:
             log(f"Erro crítico na iteração {i_global}: {e}. Reiniciando o navegador...", "erro")
+            if driver:
+                diagnostico(driver, f"antes de reiniciar (iteração {i_global})")
             if log_registros:
                 save_or_concat(log_registros, save)
                 log_registros = []
